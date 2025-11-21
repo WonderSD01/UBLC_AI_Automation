@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - dev
+      - feature-*
+  pull_request:
+    branches:
+      - dev
+      - main
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Checkout repository
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      # Step 2: Set up Node.js
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      # Step 3: Cache node_modules for faster workflow
+      - name: Cache Node modules
+        uses: actions/cache@v3
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+      # Step 4: Install dependencies
+      - name: Install dependencies
+        run: npm install
+
+      # Step 5: Set environment variables for OpenAI (from GitHub Secrets)
+      - name: Setup environment variables
+        run: |
+          echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> $GITHUB_ENV
+
+      # Step 6: Run backend tests
+      - name: Run tests
+        run: npm test   # or replace with your actual test script
