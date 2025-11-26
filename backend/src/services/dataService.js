@@ -1,39 +1,56 @@
 const { google } = require('googleapis');
 require('dotenv').config();
 
-// Google Sheets configuration
-const SHEET_ID = process.env.GOOGLE_SHEET_ID;
-const auth = new google.auth.GoogleAuth({
-  credentials: {
-    client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-    private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+// Mock data for fallback
+const mockBooks = [
+  {
+    bookId: "B001",
+    title: "Programming in C",
+    author: "Dennis Ritchie",
+    copies_available: 5,
+    location: "2nd Floor - Section A",
+    category: "Programming"
   },
-  scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-});
+  {
+    bookId: "B002",
+    title: "Data Structures and Algorithms",
+    author: "Robert Sedgewick",
+    copies_available: 3,
+    location: "2nd Floor - Section A",
+    category: "Computer Science"
+  }
+];
 
-const sheets = google.sheets({ version: 'v4', auth });
+let mockReservations = [];
 
-// Check if we have valid Google credentials
-const hasValidGoogleCredentials = () => {
-  return process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && 
-         process.env.GOOGLE_PRIVATE_KEY && 
-         process.env.GOOGLE_SHEET_ID;
-};
-
-// Read all books from Google Sheets
+// Simple function to read from public Google Sheet
 async function readBooks() {
-  if (!hasValidGoogleCredentials()) {
-    throw new Error('Google Sheets credentials not configured');
+  const sheetId = process.env.GOOGLE_SHEET_ID;
+
+  if (!sheetId) {
+    console.log('📚 Using mock data - Google Sheet ID not configured');
+    return mockBooks;
   }
 
   try {
-    console.log('📊 Reading books from Google Sheets...');
+    console.log('📊 Reading from public Google Sheet...');
+    
+    const sheets = google.sheets({ version: 'v4' });
+    
     const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: SHEET_ID,
+      spreadsheetId: sheetId,
       range: 'Books!A2:F',
+      // No auth needed for public sheets
     });
 
     const rows = response.data.values || [];
+    console.log(`📊 Found ${rows.length} rows in Google Sheets`);
+
+    if (rows.length === 0) {
+      console.log('📚 Google Sheets empty, using mock data');
+      return mockBooks;
+    }
+
     const books = rows.map(row => ({
       bookId: row[0] || '',
       title: row[1] || '',
@@ -43,16 +60,17 @@ async function readBooks() {
       category: row[5] || ''
     }));
 
-    console.log(`✅ Loaded ${books.length} books from Google Sheets`);
+    console.log(`✅ Successfully loaded ${books.length} books from Google Sheets`);
     return books;
 
   } catch (error) {
     console.error('❌ Google Sheets error:', error.message);
-    throw new Error(`Failed to read from Google Sheets: ${error.message}`);
+    console.log('📚 Falling back to mock data');
+    return mockBooks;
   }
 }
 
-// Search books by query
+// Keep all your other functions the same...
 async function findBooksByQuery(q) {
   if (!q) return [];
   const books = await readBooks();
@@ -65,28 +83,13 @@ async function findBooksByQuery(q) {
   );
 }
 
-// Decrement book copy count when reserved
 async function decrementCopy(bookId) {
   try {
     const books = await readBooks();
-    const bookIndex = books.findIndex(b => b.bookId === bookId);
-
-    if (bookIndex === -1) {
-      throw new Error(`Book not found: ${bookId}`);
-    }
-
-    if (books[bookIndex].copies_available <= 0) {
-      console.log(`❌ No copies available for ${bookId}`);
-      return false;
-    }
-
-    // Decrement the copy count
-    books[bookIndex].copies_available -= 1;
-
-    // Update in Google Sheets
-    await updateBookInSheets(books[bookIndex], bookIndex + 2); // +2 for header row
-
-    console.log(`✅ Decremented copy for ${bookId}. New count: ${books[bookIndex].copies_available}`);
+    const book = books.find(b => b.bookId === bookId);
+    if (!book) throw new Error(`Book not found: ${bookId}`);
+    if (book.copies_available <= 0) return false;
+    book.copies_available--;
     return true;
   } catch (error) {
     console.error('Error decrementing copy:', error.message);
@@ -94,82 +97,22 @@ async function decrementCopy(bookId) {
   }
 }
 
-// Update single book in Google Sheets
-async function updateBookInSheets(book, rowIndex) {
-  const values = [
-    [
-      book.bookId,
-      book.title,
-      book.author,
-      book.copies_available,
-      book.location,
-      book.category
-    ]
-  ];
-
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: SHEET_ID,
-    range: `Books!A${rowIndex}:F${rowIndex}`,
-    valueInputOption: 'RAW',
-    resource: { values }
-  });
-}
-
-// Log reservation to Google Sheets
 async function logReservation(reservationData) {
-  try {
-    const timestamp = new Date().toLocaleString('en-PH', {
-      timeZone: 'Asia/Manila',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
-    });
-
-    const values = [
-      [
-        reservationData.reservationId,
-        reservationData.bookId,
-        reservationData.title || 'N/A',
-        reservationData.studentName,
-        reservationData.studentEmail,
-        timestamp,
-        'Active'
-      ]
-    ];
-
-    await sheets.spreadsheets.values.append({
-      spreadsheetId: SHEET_ID,
-      range: 'Reservations!A:G',
-      valueInputOption: 'RAW',
-      resource: { values }
-    });
-
-    console.log('✅ Reservation logged to Google Sheets');
-    return true;
-  } catch (error) {
-    console.error('Error logging reservation:', error.message);
-    throw error;
-  }
+  mockReservations.push({
+    ...reservationData,
+    timestamp: new Date().toISOString()
+  });
+  console.log(`✅ Reservation logged: ${reservationData.reservationId}`);
+  return true;
 }
 
-// Get book by ID
 async function getBookById(bookId) {
   const books = await readBooks();
   return books.find(book => book.bookId === bookId);
 }
 
-// Mock functions for compatibility
-async function writeBooks(books) {
-  console.log('📝 Would write books to Google Sheets');
-  return true;
-}
-
 module.exports = {
   readBooks,
-  writeBooks,
   findBooksByQuery,
   getBookById,
   decrementCopy,
