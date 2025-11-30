@@ -3,85 +3,570 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>UBLC/CITEC AI Assistant</title>
-    <link rel="stylesheet" href="style.css">
-    <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@300;400;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <title>UBLC Library Assistant</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom font for a modern look */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f4f7f9; /* Light background */
+        }
+        .header-bg {
+            background-color: #8b0000; /* Deep University Red/Maroon */
+        }
+        .primary-btn {
+            background-color: #0d6efd; /* Primary blue for Reserve */
+            transition: all 0.2s;
+        }
+        .primary-btn:hover {
+            background-color: #0b5ed7;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+        }
+        .ai-message {
+            background-color: #e0f2fe; /* Light blue for AI chat */
+            border-radius: 1rem 1rem 1rem 0;
+        }
+        .user-message {
+            background-color: #d1e7dd; /* Light green for User chat */
+            border-radius: 1rem 1rem 0 1rem;
+        }
+        /* Custom scrollbar style for chat box */
+        #chat-box::-webkit-scrollbar {
+            width: 8px;
+        }
+        #chat-box::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+    </style>
 </head>
-<body>
+<body class="min-h-screen flex flex-col">
 
-    <div id="app-container">
-        <div id="chat-container">
-            <header id="chat-header">
-                <div class="logo-area">
-<img src="ublc-logo.png" alt="UBLC/CITEC Logo" class="ublc-logo">                </div>
-                <div class="title-area">
-                    <h1>UBLC Assist</h1>
-                    <span class="status-indicator">Online</span>
-                </div>
-                <div class="controls-area">
-                    <button id="clear-chat-btn" title="Start New Conversation">
-                        <i class="fas fa-redo-alt"></i>
-                    </button>
-                    <button id="analytics-toggle-btn" title="View Analytics">
-                        <i class="fas fa-chart-bar"></i>
-                    </button>
-                </div>
-            </header>
 
-            <main id="chat-window">
-                <div class="message bot-response welcome-message">
-                    <div class="avatar">U A</div>
-                    <div class="message-content">
-                        <p>Hello! I'm your **UBLC AI Assistant**. I can help with Library, ICT, Admin, or Security inquiries. How can I assist you today?</p>
+    <!-- Global State and Logic -->
+    <script>
+        // --- 1. CONFIGURATION ---
+        // Base URL for the deployed UBLC Library API
+        const API_BASE_URL = 'https://ublc-ai-automation-1.onrender.com';
+       
+        // Centralized State Object
+        const APP_STATE = {
+            currentPage: 'list', // 'list', 'reserve'
+            loading: false,
+            error: null,
+            books: [],
+            selectedBook: null,
+            reservationData: {
+                studentId: '',
+                studentName: '',
+                studentEmail: ''
+            },
+            chatHistory: [
+                { sender: 'AI', text: "Hello! I'm your UBLC Library Assistant. I can help you search for books, check availability, or start a reservation. Ask me anything!" }
+            ],
+            isChatOpen: false,
+            isModalOpen: false,
+            modalContent: {
+                title: '',
+                message: ''
+            }
+        };
+
+
+        // --- 2. UTILITY FUNCTIONS ---
+
+
+        /** Renders Lucide Icons via inline SVG */
+        function getIcon(name, className = 'w-5 h-5') {
+            const icons = {
+                'Book': `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${className}"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"></path></svg>`,
+                'Search': `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${className}"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>`,
+                'ChevronLeft': `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${className}"><path d="m15 18-6-6 6-6"></path></svg>`,
+                'MessageCircle': `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${className}"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"></path></svg>`,
+                'CheckCircle': `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${className}"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><path d="m9 11 3 3L22 4"></path></svg>`,
+                'XCircle': `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${className}"><circle cx="12" cy="12" r="10"></circle><path d="m15 9-6 6"></path><path d="m9 9 6 6"></path></svg>`,
+                'Loader': `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${className} animate-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>`
+            };
+            return icons[name] || '';
+        }
+
+
+        /** Simple custom modal for alerts and confirmations (replaces alert/confirm) */
+        function openModal(title, message, isSuccess = true) {
+            APP_STATE.modalContent = { title, message, isSuccess };
+            APP_STATE.isModalOpen = true;
+            render();
+        }
+
+
+        function closeModal() {
+            APP_STATE.isModalOpen = false;
+            render();
+        }
+
+
+
+
+        // --- 3. API SERVICE FUNCTIONS ---
+
+
+        /** Helper for API calls with built-in loading and error handling */
+        async function apiFetch(endpoint, options = {}) {
+            APP_STATE.loading = true;
+            render();
+            try {
+                const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+                    ...options,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...options.headers
+                    }
+                });
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                APP_STATE.loading = false;
+                return data;
+            } catch (error) {
+                console.error('API Error:', error);
+                // Set application-wide error state
+                APP_STATE.error = `Could not connect to the backend. Please check the network.`;
+                APP_STATE.loading = false;
+                // Show user-friendly error modal
+                openModal('Connection Error', `Failed to connect to the backend API: ${error.message}. Please try again later.`, false);
+                render();
+                return { success: false, message: error.message };
+            }
+        }
+
+
+        /** Fetches the list of all available books. GET /api/books */
+        async function fetchBooks() {
+            APP_STATE.error = null;
+            const data = await apiFetch('/api/books');
+            if (data && Array.isArray(data)) {
+                APP_STATE.books = data;
+            } else {
+                APP_STATE.error = 'Failed to load books. The response was unexpected.';
+            }
+            render();
+        }
+
+
+        /** Submits a book reservation request. POST /api/reserve */
+        async function reserveBook() {
+            if (!APP_STATE.selectedBook) return;
+
+
+            const { studentId, studentName, studentEmail } = APP_STATE.reservationData;
+
+
+            // Client-side validation
+            if (!studentId || !studentName || !studentEmail) {
+                openModal('Validation Error', 'All student fields are required for reservation.', false);
+                return;
+            }
+            if (!/\S+@\S+\.\S+/.test(studentEmail)) {
+                openModal('Validation Error', 'Please enter a valid email address.', false);
+                return;
+            }
+
+
+            const payload = {
+                bookId: APP_STATE.selectedBook.bookId,
+                studentId,
+                studentName,
+                studentEmail
+            };
+
+
+            const result = await apiFetch('/api/reserve', {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+
+
+            if (result.success) {
+                openModal('Reservation Successful!', `Thank you, ${studentName}. Your book "${APP_STATE.selectedBook.title}" has been reserved! Your Reservation ID is: ${result.reservationId}.`, true);
+                // Reset to list view and clear form data
+                APP_STATE.currentPage = 'list';
+                APP_STATE.selectedBook = null;
+                APP_STATE.reservationData = { studentId: '', studentName: '', studentEmail: '' };
+                // Fetch books again to update availability immediately
+                fetchBooks();
+            } else {
+                openModal('Reservation Failed', result.message || 'An unknown error occurred during reservation.', false);
+            }
+            render();
+        }
+
+
+        /** Sends a message to the Gemini AI Assistant. POST /api/gemini/chat */
+        async function sendChatMessage(message) {
+            const userMessage = { sender: 'User', text: message };
+            APP_STATE.chatHistory.push(userMessage);
+            render();
+
+
+            try {
+                // Manually set loading for chat, as apiFetch sets it globally
+                APP_STATE.loading = true;
+                render();
+
+
+                const result = await apiFetch('/api/gemini/chat', {
+                    method: 'POST',
+                    body: JSON.stringify({ message: message })
+                });
+
+
+                const aiResponse = result.response || "Sorry, I couldn't get a clear answer. Please try rephrasing.";
+                APP_STATE.chatHistory.push({ sender: 'AI', text: aiResponse });
+            } catch (e) {
+                APP_STATE.chatHistory.push({ sender: 'AI', text: 'Error: Could not reach the AI service.' });
+            }
+           
+            APP_STATE.loading = false; // Manually reset loading for chat
+            render();
+           
+            // Scroll chat box to bottom after rendering
+            const chatBox = document.getElementById('chat-box');
+            if (chatBox) {
+                chatBox.scrollTop = chatBox.scrollHeight;
+            }
+        }
+
+
+        // --- 4. UI HANDLERS ---
+
+
+        function handleReserveClick(book) {
+            APP_STATE.selectedBook = book;
+            APP_STATE.currentPage = 'reserve';
+            APP_STATE.reservationData.studentId = '';
+            APP_STATE.reservationData.studentName = '';
+            APP_STATE.reservationData.studentEmail = '';
+            render();
+        }
+
+
+        function handleInputChange(event) {
+            APP_STATE.reservationData[event.target.name] = event.target.value;
+            // No need to call render here, as the values are stored in state and will be retrieved on form submission
+        }
+
+
+        function handleChatToggle() {
+            APP_STATE.isChatOpen = !APP_STATE.isChatOpen;
+            render();
+            if (APP_STATE.isChatOpen) {
+                 // Delay scroll slightly to allow CSS transition to finish
+                setTimeout(() => {
+                    const chatBox = document.getElementById('chat-box');
+                    if (chatBox) {
+                        chatBox.scrollTop = chatBox.scrollHeight;
+                    }
+                }, 10);
+            }
+        }
+
+
+        function handleChatSubmit(event) {
+            event.preventDefault();
+            const input = document.getElementById('chat-input');
+            const message = input.value.trim();
+            if (message && !APP_STATE.loading) {
+                sendChatMessage(message);
+                input.value = '';
+            }
+        }
+
+
+        // --- 5. RENDERING FUNCTIONS ---
+
+
+        /** Renders the list of available books */
+        function renderBookList() {
+            if (APP_STATE.loading) {
+                return `<div class="text-center p-8">${getIcon('Loader', 'w-8 h-8 mx-auto text-blue-500')} <p class="mt-2 text-gray-600">Loading book catalog...</p></div>`;
+            }
+
+
+            if (APP_STATE.error) {
+                return `<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-xl relative shadow-md" role="alert"><strong class="font-bold">Error!</strong><span class="block sm:inline"> ${APP_STATE.error}</span></div>`;
+            }
+
+
+            if (APP_STATE.books.length === 0) {
+                return `<div class="text-center p-8 bg-white rounded-xl shadow-lg"><p class="text-gray-500">No books found in the catalog. Try refreshing or asking the AI Assistant for help!</p></div>`;
+            }
+
+
+            return `
+                <h2 class="text-2xl font-bold text-gray-700 mb-6">Available Books for Reservation</h2>
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                    ${APP_STATE.books.map(book => `
+                        <div class="book-card bg-white p-6 rounded-xl shadow-lg hover:shadow-xl transition duration-300 flex flex-col justify-between">
+                            <div>
+                                <div class="flex items-start justify-between mb-3">
+                                    <h3 class="text-xl font-semibold text-gray-800">${book.title}</h3>
+                                    <span class="text-sm font-medium ${book.copies_available > 0 ? 'text-green-600 bg-green-100' : 'text-red-600 bg-red-100'} px-3 py-1 rounded-full whitespace-nowrap">${book.copies_available} available</span>
+                                </div>
+                                <p class="text-gray-500 italic mb-4">By ${book.author}</p>
+                                <p class="text-gray-600 text-sm mb-4 line-clamp-3">${book.description || 'No description available.'}</p>
+                            </div>
+                            <div class="mt-4">
+                                <button
+                                    class="primary-btn w-full text-white font-semibold py-2 px-4 rounded-lg shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+                                    onclick="handleReserveClick(${JSON.stringify(book).replace(/"/g, '&quot;')})"
+                                    ${book.copies_available <= 0 ? 'disabled' : ''}
+                                >
+                                    ${getIcon('Book', 'w-5 h-5 mr-2')}
+                                    ${book.copies_available > 0 ? 'Reserve Now' : 'Out of Stock'}
+                                </button>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+
+        /** Renders the reservation form */
+        function renderReservationForm() {
+            const book = APP_STATE.selectedBook;
+            if (!book) {
+                // If somehow navigated here without a book, redirect back to list
+                setTimeout(() => { APP_STATE.currentPage = 'list'; render(); }, 0);
+                return `<div class="text-center p-8">Redirecting...</div>`;
+            }
+
+
+            return `
+                <div class="max-w-3xl mx-auto bg-white p-8 rounded-xl shadow-2xl">
+                    <button onclick="APP_STATE.currentPage = 'list'; render();" class="text-gray-600 hover:text-gray-800 flex items-center mb-6 transition">
+                        ${getIcon('ChevronLeft', 'w-5 h-5 mr-2')}
+                        Back to Catalog
+                    </button>
+                    <h2 class="text-3xl font-bold text-gray-700 mb-2">Book Reservation</h2>
+                    <p class="text-xl text-blue-600 font-medium mb-6">"${book.title}"</p>
+
+
+                    <!-- Book Details Summary -->
+                    <div class="border-l-4 border-blue-500 pl-4 py-3 mb-8 bg-blue-50 rounded-lg">
+                        <p class="text-gray-600">Author: <span class="font-semibold">${book.author}</span></p>
+                        <p class="text-gray-600">Copies Available: <span class="font-semibold text-green-700">${book.copies_available}</span></p>
+                    </div>
+                   
+                    <form id="reservation-form" onsubmit="event.preventDefault(); reserveBook();">
+                        <h3 class="text-xl font-semibold text-gray-700 mb-4 border-b pb-2">Your Information</h3>
+                       
+                        <!-- Student ID -->
+                        <div class="mb-5">
+                            <label for="studentId" class="block text-sm font-medium text-gray-700 mb-1">Student ID (Required)</label>
+                            <input type="text" id="studentId" name="studentId"
+                                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                                value="${APP_STATE.reservationData.studentId}"
+                                oninput="handleInputChange(event)" required>
+                        </div>
+
+
+                        <!-- Student Name -->
+                        <div class="mb-5">
+                            <label for="studentName" class="block text-sm font-medium text-gray-700 mb-1">Full Name (Required)</label>
+                            <input type="text" id="studentName" name="studentName"
+                                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                                value="${APP_STATE.reservationData.studentName}"
+                                oninput="handleInputChange(event)" required>
+                        </div>
+
+
+                        <!-- Student Email -->
+                        <div class="mb-6">
+                            <label for="studentEmail" class="block text-sm font-medium text-gray-700 mb-1">UB Email (Required for Confirmation)</label>
+                            <input type="email" id="studentEmail" name="studentEmail"
+                                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                                value="${APP_STATE.reservationData.studentEmail}"
+                                oninput="handleInputChange(event)" required>
+                        </div>
+
+
+                        <button type="submit" class="primary-btn w-full text-white font-bold py-3 px-4 rounded-lg text-lg shadow-xl hover:shadow-2xl flex items-center justify-center disabled:opacity-50" ${APP_STATE.loading ? 'disabled' : ''}>
+                            ${APP_STATE.loading ? getIcon('Loader', 'w-6 h-6 mr-2') : getIcon('CheckCircle', 'w-6 h-6 mr-2')}
+                            ${APP_STATE.loading ? 'Processing...' : 'Confirm Reservation'}
+                        </button>
+                    </form>
+                </div>
+            `;
+        }
+
+
+        /** Renders the chat component and its floating button */
+        function renderChat() {
+            const isHidden = !APP_STATE.isChatOpen;
+            const chatBoxContent = APP_STATE.chatHistory.map(msg => `
+                <div class="flex ${msg.sender === 'User' ? 'justify-end' : 'justify-start'} mb-4">
+                    <div class="max-w-xs md:max-w-md lg:max-w-lg p-3 rounded-xl shadow-md ${msg.sender === 'User' ? 'user-message text-gray-800' : 'ai-message text-gray-800'}">
+                        ${msg.text}
                     </div>
                 </div>
+            `).join('');
 
-                <div id="quick-actions">
-                    <button class="quick-action-btn" data-query="Library Services">Library Services</button>
-                    <button class="quick-action-btn" data-query="ICT Help">ICT Help</button>
-                    <button class="quick-action-btn" data-query="Admin Clearance">Admin Clearance</button>
-                    <button class="quick-action-btn" data-query="Campus Security">Campus Security</button>
-                </div>
 
-                </main>
+            return `
+                <div id="chat-widget" class="fixed bottom-4 right-4 z-50">
+                    <!-- Chat Window -->
+                    <div class="bg-white rounded-xl shadow-2xl w-80 md:w-96 transform transition-all duration-300 ${isHidden ? 'scale-0 opacity-0 -translate-y-2' : 'scale-100 opacity-100'} origin-bottom-right mb-4">
+                        <div class="header-bg text-white p-4 rounded-t-xl flex justify-between items-center">
+                            <h3 class="font-bold text-lg flex items-center">${getIcon('MessageCircle', 'w-5 h-5 mr-2')} AI Assistant</h3>
+                            <button onclick="handleChatToggle()" class="p-1 rounded-full hover:bg-white hover:bg-opacity-20 transition">${getIcon('XCircle', 'w-6 h-6')}</button>
+                        </div>
+                        <div id="chat-box" class="h-80 overflow-y-auto p-4 flex flex-col space-y-4">
+                            ${chatBoxContent}
+                            <!-- AI Typing Indicator -->
+                            ${APP_STATE.loading ? '<div class="flex justify-start mb-4"><div class="ai-message text-gray-800 p-3 rounded-xl shadow-md flex items-center"><span class="mr-2">Thinking...</span>' + getIcon('Loader', 'w-4 h-4') + '</div></div>' : ''}
+                        </div>
+                        <form onsubmit="handleChatSubmit(event)" class="p-4 border-t flex">
+                            <input type="text" id="chat-input" placeholder="Ask about books..."
+                                class="flex-grow px-3 py-2 border border-gray-300 rounded-l-lg focus:outline-none focus:border-blue-500"
+                                ${APP_STATE.loading ? 'disabled' : ''}>
+                            <button type="submit" class="primary-btn text-white px-4 py-2 rounded-r-lg disabled:opacity-50" ${APP_STATE.loading ? 'disabled' : ''}>
+                                ${getIcon('Search', 'w-5 h-5')}
+                            </button>
+                        </form>
+                    </div>
 
-            <footer id="chat-input-area">
-                <input type="text" id="user-input" placeholder="Type your question here...">
-                <button id="send-btn" title="Send Message">
-                    <i class="fas fa-paper-plane"></i>
-                </button>
-            </footer>
-        </div>
 
-        <aside id="analytics-panel" class="hidden">
-            <header>
-                <h2>📊 AI Usage Metrics</h2>
-            </header>
-            <div class="metrics-body">
-                <div class="metric-card">
-                    <h3>Total Inquiries (Today)</h3>
-                    <p id="metric-inquiries">1,245</p>
+                    <!-- Chat Button -->
+                    <button onclick="handleChatToggle()" class="header-bg text-white p-4 rounded-full shadow-2xl hover:scale-105 transition-transform">
+                        ${getIcon('MessageCircle', 'w-8 h-8')}
+                    </button>
                 </div>
-                <div class="metric-card">
-                    <h3>Avg. Response Time</h3>
-                    <p id="metric-response-time">1.8s</p>
+            `;
+        }
+       
+        /** Renders the main modal for messages (replaces alert/confirm) */
+        function renderModal() {
+            if (!APP_STATE.isModalOpen) return '';
+
+
+            const { title, message, isSuccess } = APP_STATE.modalContent;
+            const icon = isSuccess ? getIcon('CheckCircle', 'w-10 h-10') : getIcon('XCircle', 'w-10 h-10');
+            const iconColor = isSuccess ? 'text-green-500' : 'text-red-500';
+            const buttonColor = isSuccess ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700';
+
+
+            return `
+                <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100]" onclick="closeModal()">
+                    <div class="bg-white p-8 rounded-xl shadow-2xl max-w-sm w-full mx-4 transform scale-100 transition-transform duration-300" onclick="event.stopPropagation()">
+                        <div class="text-center mb-6">
+                            <div class="mx-auto ${iconColor} mb-4">${icon}</div>
+                            <h3 class="text-xl font-bold text-gray-800">${title}</h3>
+                        </div>
+                        <p class="text-gray-600 text-center mb-6 whitespace-pre-wrap">${message}</p>
+                        <button onclick="closeModal()" class="w-full ${buttonColor} text-white font-semibold py-2 rounded-lg transition">
+                            Close
+                        </button>
+                    </div>
                 </div>
-                <div class="metric-card full-width">
-                    <h3>Top 5 FAQs</h3>
-                    <ul id="metric-faqs">
-                        <li>1. Book renewal process</li>
-                        <li>2. Wi-Fi connection steps</li>
-                        <li>3. Enrollment requirements</li>
-                        <li>4. Clearance status check</li>
-                        <li>5. Campus emergency hotline</li>
-                    </ul>
-                </div>
+            `;
+        }
+
+
+        /** Main rendering function: updates the entire UI based on APP_STATE */
+        function render() {
+            const app = document.getElementById('app');
+            const chatContainer = document.getElementById('chat-container');
+            const modalContainer = document.getElementById('modal-container');
+
+
+            // 1. Render Main Content Area
+            if (APP_STATE.currentPage === 'list') {
+                app.innerHTML = renderBookList();
+            } else if (APP_STATE.currentPage === 'reserve') {
+                app.innerHTML = renderReservationForm();
+            }
+
+
+            // 2. Render Chat Widget
+            if (chatContainer) {
+                chatContainer.innerHTML = renderChat();
+            }
+
+
+            // 3. Render Modal
+            if (modalContainer) {
+                modalContainer.innerHTML = renderModal();
+            }
+        }
+
+
+        // --- 6. INITIALIZATION ---
+
+
+        window.onload = () => {
+            // Setup main container structure
+            const mainContent = document.getElementById('main-content');
+            mainContent.innerHTML = `
+                <div id="app" class="p-4 md:p-8 lg:p-12"></div>
+                <div id="chat-container"></div>
+                <div id="modal-container"></div>
+            `;
+           
+            // Expose handlers globally for inline HTML event attributes
+            window.APP_STATE = APP_STATE;
+            window.handleReserveClick = handleReserveClick;
+            window.handleInputChange = handleInputChange;
+            window.reserveBook = reserveBook;
+            window.handleChatToggle = handleChatToggle;
+            window.handleChatSubmit = handleChatSubmit;
+            window.closeModal = closeModal;
+            window.openModal = openModal;
+
+
+            // Start by fetching the books and rendering the initial state
+            fetchBooks();
+        };
+    </script>
+
+
+    <!-- Header Section -->
+    <header class="header-bg shadow-lg">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+        <div class="flex items-center space-x-3">
+            <img src="ublc-logo.png" alt="UBLC Logo" class="w-12 h-12 object-cover rounded-full border-2 border-white">
+            <div>
+                <h1 class="text-2xl font-extrabold text-white">UBLC Library Assistant</h1>
+                <p class="text-sm text-red-200">University of Batangas Lipa Campus</p>
             </div>
-        </aside>
-
+        </div>
     </div>
+</header>
 
-    <script src="script.js"></script>
+
+
+    <!-- Main Content Area -->
+    <main id="main-content" class="flex-grow p-4 md:p-8 max-w-7xl mx-auto w-full">
+        <!-- Placeholder while JS initializes -->
+        <div class="text-center p-16">
+            <p class="text-gray-500">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-6 h-6 mx-auto animate-spin"></svg>
+                Initializing application...
+            </p>
+        </div>
+    </main>
+
+
+    <!-- Footer -->
+    <footer class="bg-gray-100 border-t mt-auto">
+        <div class="max-w-7xl mx-auto py-4 px-4 sm:px-6 lg:px-8 text-center text-gray-500 text-sm">
+            &copy; 2025 UBLC AI Automation Project. All rights reserved.
+        </div>
+    </footer>
+
+
 </body>
 </html>
