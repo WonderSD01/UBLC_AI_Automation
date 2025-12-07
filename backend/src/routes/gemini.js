@@ -137,7 +137,12 @@ What would you like to know about? You can ask about:
 
 // Try different Gemini models in order
 async function tryGeminiModels(prompt) {
-  const models = ['gemini-1.5-flash', 'gemini-1.5-flash-latest', 'gemini-1.0-pro'];
+  // Correct model names for v1beta API
+  const models = [
+    'gemini-1.5-flash-001',      // Updated model name
+    'gemini-1.5-pro-001',        // Updated model name
+    'gemini-1.0-pro-001'         // Updated model name
+  ];
   
   for (const modelName of models) {
     try {
@@ -274,9 +279,9 @@ router.post('/chat/library', aiLimiter, async (req, res) => {
     }
 
     try {
-      const model = genAI.getGenerativeModel({ 
-        model: "gemini-1.5-flash"
-      });
+const model = genAI.getGenerativeModel({ 
+  model: "gemini-1.5-flash-001"  // Updated
+});
       
       const result = await model.generateContent(enhancedPrompt);
       const response = await result.response;
@@ -314,17 +319,16 @@ router.post('/chat/library', aiLimiter, async (req, res) => {
 // GET /api/gemini/models - List available models
 router.get('/models', async (req, res) => {
   try {
-    const models = {
-      available: [
-        { name: "gemini-1.5-flash", description: "Fast, versatile model" },
-        { name: "gemini-1.5-flash-latest", description: "Latest flash model" },
-        { name: "gemini-1.5-pro", description: "Higher quality, slower" },
-        { name: "gemini-1.0-pro", description: "Legacy pro model" }
-      ],
-      recommended: "gemini-1.5-flash",
-      status: genAI ? "configured" : "not-configured",
-      note: "Free tier has rate limits. Fallback responses available."
-    };
+const models = {
+  available: [
+    { name: "gemini-1.5-flash-001", description: "Fast, versatile model" },
+    { name: "gemini-1.5-pro-001", description: "Higher quality, slower" },
+    { name: "gemini-1.0-pro-001", description: "Legacy pro model" }
+  ],
+  recommended: "gemini-1.5-flash-001",
+  status: genAI ? "configured" : "not-configured",
+  note: "Free tier has rate limits. Fallback responses available."
+};
     
     res.json({
       success: true,
