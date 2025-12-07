@@ -1,56 +1,53 @@
-// src/routes/huggingface.js - COMPLETE FREE AI CHATBOT
 const express = require('express');
 const router = express.Router();
 const rateLimit = require('express-rate-limit');
 
-// Rate limiting - more requests with token
+// Rate limiting
 const aiLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 30, // 30 requests per minute with token
+  windowMs: 60 * 1000,
+  max: 30,
   message: {
     success: false,
-    error: 'Too many AI requests. Please wait a moment.',
-    note: 'Rate limit exceeded. Free tier allows 30 requests/minute.'
+    error: 'Too many AI requests. Please wait a moment.'
   },
   standardHeaders: true,
   legacyHeaders: false,
 });
 
-// Your Hugging Face Token (from environment variable)
+// Your Hugging Face Token
 const HF_TOKEN = process.env.HF_TOKEN;
 const HAS_TOKEN = !!HF_TOKEN;
 
-console.log(`🔧 Hugging Face configured: ${HAS_TOKEN ? 'WITH TOKEN' : 'PUBLIC ACCESS'}`);
+console.log(`🔧 Hugging Face: ${HAS_TOKEN ? 'Token configured' : 'Public access'}`);
 
-// Models that work well for chat (prioritized)
-const CHAT_MODELS = [
+// NEW: Hugging Face Router API endpoint
+const HF_ROUTER_URL = 'https://router.huggingface.co/hf-inference/models';
+
+// Models that work with the new router API
+const ROUTER_MODELS = [
   {
     name: 'microsoft/DialoGPT-medium',
-    url: 'https://api-inference.huggingface.co/models/microsoft/DialoGPT-medium',
-    type: 'dialog',
-    description: 'Best for conversational chat'
-  },
-  {
-    name: 'microsoft/DialoGPT-small',
-    url: 'https://api-inference.huggingface.co/models/microsoft/DialoGPT-small',
-    type: 'dialog',
-    description: 'Lightweight chat model'
+    task: 'conversational',
+    description: 'Best for chat conversations'
   },
   {
     name: 'google/flan-t5-base',
-    url: 'https://api-inference.huggingface.co/models/google/flan-t5-base',
-    type: 'instruction',
-    description: 'Good for following instructions'
+    task: 'text2text-generation',
+    description: 'Good for instructions'
   },
   {
     name: 'distilgpt2',
-    url: 'https://api-inference.huggingface.co/models/distilgpt2',
-    type: 'text',
+    task: 'text-generation',
     description: 'Fast text generation'
+  },
+  {
+    name: 'facebook/blenderbot-400M-distill',
+    task: 'conversational',
+    description: 'Chat-optimized model'
   }
 ];
 
-// LIBRARY SYSTEM PROMPT
+// LIBRARY SYSTEM PROMPT (same as before)
 const LIBRARY_SYSTEM_PROMPT = `You are UBLC Library Assistant for University of Batangas Lipa Campus.
 
 YOUR ROLE:
@@ -66,12 +63,6 @@ LIBRARY INFORMATION:
 - Max Books: 2 per student
 - Late Fee: ₱10 per day
 - Reservation Hold: 3 days
-
-RESERVATION PROCESS:
-1. Student provides: ID, Name, Email
-2. Check book availability
-3. Confirm reservation details
-4. Send email confirmation
 
 BOOK CATEGORIES AVAILABLE:
 - Programming (C, Python, Java)
@@ -89,7 +80,7 @@ RESPONSE STYLE:
 - Guide step-by-step through processes
 - Always confirm successful actions`;
 
-// Fallback responses when AI fails
+// Fallback responses (same as before)
 function getLibraryFallbackResponse(message) {
   const msg = message.toLowerCase().trim();
   
@@ -126,49 +117,6 @@ Once you provide these, I can:
 What book would you like to reserve?`;
   }
   
-  if (msg.includes('hour') || msg.includes('open') || msg.includes('close') || msg.includes('time')) {
-    return `🏛️ **UBLC Library Hours:**
-    
-**Regular Hours:**
-- Monday to Friday: 8:00 AM - 5:00 PM
-- Saturday: 9:00 AM - 12:00 PM  
-- Sunday: Closed
-
-**Holiday Schedule:**
-- University holidays: Closed
-- Exam periods: Extended hours may apply
-
-**Services Available:**
-- Book borrowing & returns
-- Computer access stations
-- Study areas
-- Research assistance
-- Reservation pickups
-
-Reservations can be picked up during library hours.`;
-  }
-  
-  if (msg.includes('rule') || msg.includes('policy') || msg.includes('late') || msg.includes('fee')) {
-    return `📋 **Library Policies & Rules:**
-    
-**Borrowing Rules:**
-- Loan Period: 7 days per book
-- Maximum Books: 2 per student at a time
-- Renewals: 1 renewal allowed if no waitlist
-- Reservations: Held for 3 business days
-
-**Fees & Penalties:**
-- Late Fee: ₱10 per day per book
-- Lost Books: Replacement cost + ₱500 processing fee
-- Damaged Books: Repair/replacement cost
-
-**General Rules:**
-- Student ID required for all transactions
-- No food or drinks in book areas
-- Silence must be observed in study areas
-- Return books to designated drop boxes after hours`;
-  }
-  
   if (msg.includes('hello') || msg.includes('hi') || msg.includes('hey') || msg.includes('what can you do')) {
     return `👋 **Hello! I'm UBLC Library Assistant**
 
@@ -187,48 +135,31 @@ I can help you with:
 How can I assist you today?`;
   }
   
-  // Default response
-  return `I'm here to help with UBLC library services!
-
-This AI assistant demonstrates:
-🤖 **AI Integration** - Natural language understanding
-📊 **Real-time Data** - Connected to live Google Sheets  
-✅ **Automation** - Reservation processing with email
-🚀 **Deployment** - Live on Render with CI/CD
-📈 **Analytics** - Usage tracking and monitoring
-
-You can ask me about available books, make reservations, check library hours, or learn about borrowing policies.
+  return `I'm here to help with UBLC library services! You can ask me about available books, make reservations, check library hours, or learn about borrowing policies.
 
 How can I help you today?`;
 }
 
-// Call Hugging Face Inference API
-async function callHuggingFace(prompt, modelIndex = 0) {
+// NEW: Call Hugging Face Router API
+async function callHuggingFaceRouter(prompt, modelIndex = 0) {
   try {
-    if (modelIndex >= CHAT_MODELS.length) {
+    if (modelIndex >= ROUTER_MODELS.length) {
       throw new Error('All models failed');
     }
     
-    const model = CHAT_MODELS[modelIndex];
-    console.log(`🤖 Trying model ${modelIndex + 1}/${CHAT_MODELS.length}: ${model.name}`);
+    const model = ROUTER_MODELS[modelIndex];
+    console.log(`🤖 Trying model: ${model.name} (${model.task})`);
     
-    // Prepare headers
-    const headers = {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json'
-    };
-    
-    // Add authorization if token available
-    if (HF_TOKEN) {
-      headers['Authorization'] = `Bearer ${HF_TOKEN}`;
+    if (!HF_TOKEN) {
+      throw new Error('HF token required for router API');
     }
     
-    // Prepare request based on model type
+    // Prepare request based on task
     let requestBody;
-    const maxLength = 200;
+    const url = `${HF_ROUTER_URL}/${model.name}`;
     
-    switch (model.type) {
-      case 'dialog':
+    switch (model.task) {
+      case 'conversational':
         requestBody = {
           inputs: {
             text: prompt,
@@ -236,80 +167,66 @@ async function callHuggingFace(prompt, modelIndex = 0) {
             generated_responses: []
           },
           parameters: {
-            max_length: maxLength,
+            max_length: 200,
             temperature: 0.8,
             top_p: 0.95
           }
         };
         break;
         
-      case 'instruction':
+      case 'text2text-generation':
         requestBody = {
-          inputs: `Library question: ${prompt}\nAssistant response:`,
+          inputs: prompt,
           parameters: {
-            max_length: maxLength,
-            temperature: 0.7,
-            do_sample: true
+            max_length: 200,
+            temperature: 0.7
           }
         };
         break;
         
-      default: // text generation
+      default: // text-generation
         requestBody = {
           inputs: prompt,
           parameters: {
-            max_new_tokens: maxLength,
+            max_new_tokens: 150,
             temperature: 0.8,
-            top_k: 50,
             top_p: 0.95,
-            do_sample: true,
-            return_full_text: false
+            do_sample: true
           }
         };
     }
     
-    // Make API call with timeout
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
-    
-    const response = await fetch(model.url, {
+    const response = await fetch(url, {
       method: 'POST',
-      headers: headers,
-      body: JSON.stringify(requestBody),
-      signal: controller.signal
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${HF_TOKEN}`
+      },
+      body: JSON.stringify(requestBody)
     });
     
-    clearTimeout(timeoutId);
-    
-    // Handle different response statuses
     if (response.status === 429) {
-      console.log(`⚠️ Rate limit for ${model.name}, trying next model...`);
-      return callHuggingFace(prompt, modelIndex + 1);
-    }
-    
-    if (response.status === 503) {
-      console.log(`🔄 Model ${model.name} is loading, trying next...`);
-      return callHuggingFace(prompt, modelIndex + 1);
+      console.log(`⚠️ Rate limit, trying next model...`);
+      return callHuggingFaceRouter(prompt, modelIndex + 1);
     }
     
     if (!response.ok) {
-      const errorText = await response.text().catch(() => 'No error details');
+      const errorText = await response.text();
       console.error(`❌ ${model.name} error ${response.status}:`, errorText.substring(0, 100));
       
-      // Try next model
-      if (modelIndex + 1 < CHAT_MODELS.length) {
-        await new Promise(resolve => setTimeout(resolve, 500)); // Small delay
-        return callHuggingFace(prompt, modelIndex + 1);
+      if (modelIndex + 1 < ROUTER_MODELS.length) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        return callHuggingFaceRouter(prompt, modelIndex + 1);
       }
-      throw new Error(`API error ${response.status}: ${errorText.substring(0, 100)}`);
+      throw new Error(`Router API error: ${response.status}`);
     }
     
     const data = await response.json();
     
-    // Parse response based on model type
+    // Parse response
     let aiResponse = '';
     
-    if (model.type === 'dialog' && data.generated_text) {
+    if (model.task === 'conversational' && data.generated_text) {
       aiResponse = data.generated_text;
     } else if (Array.isArray(data) && data[0] && data[0].generated_text) {
       aiResponse = data[0].generated_text;
@@ -323,19 +240,15 @@ async function callHuggingFace(prompt, modelIndex = 0) {
       aiResponse = JSON.stringify(data).substring(0, 200);
     }
     
-    // Clean up response
+    // Clean response
     aiResponse = aiResponse
-      .replace(/Library question:/g, '')
-      .replace(/Assistant response:/g, '')
-      .replace(/^[^a-zA-Z0-9"'\(\)]+/, '') // Remove leading non-alphanumeric
-      .replace(/[^a-zA-Z0-9\s.,!?'"\(\):-]+$/g, '') // Remove trailing garbage
+      .replace(/^[^a-zA-Z0-9"'\(\)]+/, '')
       .trim();
     
-    // Ensure response is reasonable
-    if (!aiResponse || aiResponse.length < 10 || aiResponse.length > 1000) {
-      console.log(`⚠️ Invalid response from ${model.name}: "${aiResponse.substring(0, 50)}"`);
-      if (modelIndex + 1 < CHAT_MODELS.length) {
-        return callHuggingFace(prompt, modelIndex + 1);
+    if (!aiResponse || aiResponse.length < 10) {
+      console.log(`⚠️ Invalid response, trying next model...`);
+      if (modelIndex + 1 < ROUTER_MODELS.length) {
+        return callHuggingFaceRouter(prompt, modelIndex + 1);
       }
       throw new Error('Invalid AI response');
     }
@@ -346,104 +259,177 @@ async function callHuggingFace(prompt, modelIndex = 0) {
       success: true,
       text: aiResponse,
       model: model.name,
-      model_type: model.type,
-      provider: 'huggingface',
-      used_token: HAS_TOKEN
+      task: model.task,
+      provider: 'huggingface-router',
+      used_token: true
     };
     
   } catch (error) {
-    if (error.name === 'AbortError') {
-      console.error(`⏰ Timeout for model ${modelIndex}`);
-      if (modelIndex + 1 < CHAT_MODELS.length) {
-        return callHuggingFace(prompt, modelIndex + 1);
-      }
+    console.error('❌ Router API error:', error.message);
+    
+    // If token is missing, use fallback immediately
+    if (error.message.includes('token required')) {
+      return {
+        success: false,
+        error: 'HF token required for router API',
+        provider: 'huggingface-router'
+      };
     }
     
-    console.error(`❌ Hugging Face error:`, error.message);
+    if (modelIndex + 1 < ROUTER_MODELS.length) {
+      return callHuggingFaceRouter(prompt, modelIndex + 1);
+    }
+    
     return {
       success: false,
       error: error.message,
-      provider: 'huggingface',
-      used_token: HAS_TOKEN
+      provider: 'huggingface-router'
     };
   }
 }
 
+// Try old API as fallback (some models might still work)
+async function callHuggingFaceOldAPI(prompt) {
+  try {
+    // Try a few old endpoints that might still work
+    const oldEndpoints = [
+      'https://huggingface.co/api/models/microsoft/DialoGPT-medium',
+      'https://huggingface.co/api/models/google/flan-t5-base'
+    ];
+    
+    for (const endpoint of oldEndpoints) {
+      try {
+        console.log(`🔄 Trying old endpoint: ${endpoint}`);
+        
+        const response = await fetch(`${endpoint}/inference`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(HF_TOKEN && { 'Authorization': `Bearer ${HF_TOKEN}` })
+          },
+          body: JSON.stringify({
+            inputs: prompt,
+            parameters: { max_length: 150 }
+          })
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          if (data && data[0] && data[0].generated_text) {
+            return {
+              success: true,
+              text: data[0].generated_text,
+              model: endpoint.split('/').pop(),
+              provider: 'huggingface-old',
+              used_token: !!HF_TOKEN
+            };
+          }
+        }
+      } catch (e) {
+        continue;
+      }
+    }
+    
+    throw new Error('All old endpoints failed');
+    
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message,
+      provider: 'huggingface-old'
+    };
+  }
+}
+
+// Main AI calling function
+async function callAI(prompt) {
+  // First try new router API
+  const routerResult = await callHuggingFaceRouter(prompt);
+  if (routerResult.success) return routerResult;
+  
+  console.log('🔄 Router API failed, trying old API...');
+  
+  // Try old API as fallback
+  const oldResult = await callHuggingFaceOldAPI(prompt);
+  if (oldResult.success) return oldResult;
+  
+  return {
+    success: false,
+    error: 'All AI services unavailable',
+    provider: 'none'
+  };
+}
+
 // ========== API ENDPOINTS ==========
 
-// POST /api/huggingface/chat - Main chat endpoint
+// POST /api/huggingface/chat
 router.post('/chat', aiLimiter, async (req, res) => {
   try {
     const { message } = req.body;
     
-    if (!message || typeof message !== 'string') {
+    if (!message) {
       return res.status(400).json({
         success: false,
-        error: 'Valid message is required',
+        error: 'Message required',
         timestamp: new Date().toISOString()
       });
     }
     
     const fullPrompt = `${LIBRARY_SYSTEM_PROMPT}\n\nUser: ${message}\nAssistant:`;
     
-    console.log(`💬 Chat request: "${message.substring(0, 80)}${message.length > 80 ? '...' : ''}"`);
+    console.log(`💬 Chat: "${message.substring(0, 80)}${message.length > 80 ? '...' : ''}"`);
     
-    // Call Hugging Face AI
-    const aiResult = await callHuggingFace(fullPrompt);
+    const aiResult = await callAI(fullPrompt);
     
     if (aiResult.success) {
       return res.json({
         success: true,
         response: aiResult.text,
-        source: 'ai-huggingface',
+        source: `ai-${aiResult.provider}`,
         model: aiResult.model,
         provider: aiResult.provider,
-        used_token: aiResult.used_token,
         timestamp: new Date().toISOString()
       });
     } else {
-      console.log(`⚠️ AI failed, using fallback: ${aiResult.error}`);
+      console.log(`⚠️ AI failed: ${aiResult.error}`);
       return res.json({
         success: true,
         response: getLibraryFallbackResponse(message),
         source: 'fallback',
-        note: `AI service unavailable: ${aiResult.error}`,
+        note: `AI service: ${aiResult.error}`,
         timestamp: new Date().toISOString()
       });
     }
     
   } catch (error) {
-    console.error('❌ Chat endpoint error:', error);
+    console.error('❌ Chat error:', error);
     return res.json({
       success: true,
       response: getLibraryFallbackResponse(req.body?.message || ''),
       source: 'error-fallback',
-      note: 'Service error occurred',
+      note: 'Service error',
       timestamp: new Date().toISOString()
     });
   }
 });
 
-// GET /api/huggingface/test - Test endpoint
+// GET /api/huggingface/test
 router.get('/test', async (req, res) => {
   try {
     console.log('🧪 Testing Hugging Face AI...');
     
-    const testPrompt = "Say 'UBLC Library AI Assistant is working correctly!'";
-    const aiResult = await callHuggingFace(testPrompt);
+    const testPrompt = "Say 'UBLC Library AI is working!'";
+    const aiResult = await callAI(testPrompt);
     
     if (aiResult.success) {
       res.json({
         success: true,
         message: '🎉 HUGGING FACE AI IS WORKING!',
-        provider: 'huggingface',
-        model_used: aiResult.model,
+        provider: aiResult.provider,
+        model: aiResult.model,
         test_response: aiResult.text,
-        used_token: aiResult.used_token,
-        available_models: CHAT_MODELS.map(m => m.name),
-        token_configured: HAS_TOKEN,
-        rate_limit: '30 requests/minute',
-        free_tier: true,
+        used_token: !!HF_TOKEN,
+        api_type: 'router-api',
         timestamp: new Date().toISOString()
       });
     } else {
@@ -451,10 +437,10 @@ router.get('/test', async (req, res) => {
         success: false,
         message: 'Hugging Face AI test failed',
         error: aiResult.error,
-        provider: 'huggingface',
-        available_models: CHAT_MODELS.map(m => m.name),
+        provider: aiResult.provider,
         token_configured: HAS_TOKEN,
-        suggestion: HAS_TOKEN ? 'Check token permissions' : 'Try adding HF_TOKEN for better performance',
+        suggestion: 'Hugging Face API endpoints changed. Using fallback responses.',
+        fallback_working: true,
         timestamp: new Date().toISOString()
       });
     }
@@ -468,48 +454,30 @@ router.get('/test', async (req, res) => {
   }
 });
 
-// GET /api/huggingface/status - Status endpoint
+// GET /api/huggingface/status
 router.get('/status', (req, res) => {
   res.json({
     success: true,
     provider: 'huggingface',
     configured: true,
     token_configured: HAS_TOKEN,
-    token_status: HAS_TOKEN ? 'Token available' : 'Using public access',
+    api_endpoint: 'router.huggingface.co',
     rate_limit: '30 requests/minute',
     free_tier: true,
     no_payment_required: true,
-    available_models: CHAT_MODELS.map(m => ({
-      name: m.name,
-      type: m.type,
-      description: m.description
-    })),
+    models_available: ROUTER_MODELS.map(m => m.name),
     endpoints: [
       'POST /api/huggingface/chat',
       'GET /api/huggingface/test',
       'GET /api/huggingface/status'
     ],
     features: [
-      'Natural language understanding',
-      'Library-specific knowledge',
-      'Fallback responses',
+      'Natural language AI',
+      'Library-specific responses',
+      'Robust fallback system',
       'Multiple model fallbacks',
-      'Rate limiting'
+      'Real Google Sheets integration'
     ],
-    project: 'UBLC Library AI Assistant',
-    institution: 'University of Batangas Lipa Campus',
-    timestamp: new Date().toISOString()
-  });
-});
-
-// GET /api/huggingface/models - List available models
-router.get('/models', (req, res) => {
-  res.json({
-    success: true,
-    models: CHAT_MODELS,
-    current_preference: 'DialoGPT-medium (best for chat)',
-    token_required: 'Optional (improves performance)',
-    free_forever: true,
     timestamp: new Date().toISOString()
   });
 });
