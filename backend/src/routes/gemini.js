@@ -1,4 +1,4 @@
-// src/routes/gemini.js - UPDATED with correct Gemini model names
+// src/routes/gemini.js - COMPLETE FIX FOR GEMINI AI
 const express = require('express');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const rateLimit = require('express-rate-limit');
@@ -6,8 +6,6 @@ const rateLimit = require('express-rate-limit');
 const router = express.Router();
 
 // Check if Gemini API key is available
-// At the top of gemini.js, replace the genAI initialization:
-
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 let genAI = null;
 
@@ -52,107 +50,6 @@ const aiLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
-});
-
-// Add this endpoint to discover available models
-router.get('/discover-models', async (req, res) => {
-  try {
-    if (!genAI) {
-      return res.json({
-        success: false,
-        error: "Gemini not initialized"
-      });
-    }
-
-    // Try to list models (if API supports it)
-    const testPrompts = [
-      "Say 'Model Test 1'",
-      "Say 'Model Test 2'",
-      "Say 'Model Test 3'"
-    ];
-    
-    const testModels = [
-      'gemini-pro',
-      'gemini-1.0-pro', 
-      'text-bison-001',
-      'gemini-1.5-flash'
-    ];
-    
-    const results = [];
-    
-    for (const modelName of testModels) {
-      try {
-        const model = genAI.getGenerativeModel({ model: modelName });
-        const result = await model.generateContent(testPrompts[0]);
-        const response = await result.response;
-        
-        results.push({
-          model: modelName,
-          status: "WORKING",
-          response: response.text().substring(0, 50)
-        });
-      } catch (error) {
-        results.push({
-          model: modelName,
-          status: "FAILED",
-          error: error.message.substring(0, 100)
-        });
-      }
-      
-      // Small delay between tests
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-    
-    res.json({
-      success: true,
-      results: results,
-      timestamp: new Date().toISOString()
-    });
-    
-  } catch (error) {
-    res.json({
-      success: false,
-      error: error.message,
-      timestamp: new Date().toISOString()
-    });
-  }
-});
-
-router.get('/emergency-test', async (req, res) => {
-  try {
-    const key = process.env.GEMINI_API_KEY;
-    if (!key) {
-      return res.json({ error: "No API key" });
-    }
-
-    // Simple direct test
-    const { GoogleGenerativeAI } = require("@google/generative-ai");
-    const genAI = new GoogleGenerativeAI(key);
-    
-    // Try the most basic model
-    const model = genAI.getGenerativeModel({ 
-      model: "gemini-pro" 
-    });
-    
-    const result = await model.generateContent("Hello UBLC Library");
-    const response = await result.response;
-    const text = response.text();
-
-    res.json({
-      success: true,
-      message: "🎉 GEMINI AI IS WORKING!",
-      response: text,
-      key_length: key.length,
-      key_preview: key.substring(0, 10) + "..."
-    });
-
-  } catch (error) {
-    res.json({
-      success: false,
-      error: error.message,
-      suggestion: "1. Enable API 2. Check key restrictions 3. Wait 5 minutes"
-    });
-  }
 });
 
 // LIBRARY-ONLY PROMPT WITH EXACT BOOK CATEGORIES
@@ -268,58 +165,75 @@ What would you like to know about? You can ask about:
 - Borrowing policies and fees`;
 }
 
-// Try different Gemini models in order - FIXED with common models
+// COMPREHENSIVE Gemini model testing with API version variations
 async function tryGeminiModels(prompt) {
-  // Try ALL possible model names and formats
-  const models = [
-    // Common models
-    'gemini-pro',
-    'models/gemini-pro',
-    'gemini-1.0-pro',
-    'models/gemini-1.0-pro',
-    'gemini-1.5-pro',
-    'models/gemini-1.5-pro',
+  // COMPREHENSIVE list of ALL possible Gemini model configurations
+  const modelTests = [
+    // Most likely working models for free tier with v1beta
+    { name: 'gemini-pro', apiVersion: 'v1beta' },
+    { name: 'models/gemini-pro', apiVersion: 'v1beta' },
+    { name: 'gemini-1.0-pro', apiVersion: 'v1beta' },
+    { name: 'models/gemini-1.0-pro', apiVersion: 'v1beta' },
     
-    // Flash models
-    'gemini-1.5-flash',
-    'models/gemini-1.5-flash',
-    'gemini-1.5-flash-001',
-    'models/gemini-1.5-flash-001',
+    // Try different API versions
+    { name: 'gemini-pro', apiVersion: 'v1' },
+    { name: 'models/gemini-pro', apiVersion: 'v1' },
+    { name: 'gemini-1.0-pro', apiVersion: 'v1' },
     
-    // Legacy/text models
-    'text-bison-001',
-    'models/text-bison-001',
-    'chat-bison-001',
-    'models/chat-bison-001',
+    // Try without explicit version (default)
+    { name: 'gemini-pro', apiVersion: null },
+    { name: 'gemini-1.0-pro', apiVersion: null },
     
-    // Try with different API versions
-    'gemini-pro:generateContent',
-    'gemini-1.0-pro:generateContent'
+    // Legacy models
+    { name: 'text-bison-001', apiVersion: 'v1beta' },
+    { name: 'models/text-bison-001', apiVersion: 'v1beta' },
+    { name: 'chat-bison-001', apiVersion: 'v1beta' },
+    { name: 'models/chat-bison-001', apiVersion: 'v1beta' },
+    
+    // Try with v1alpha
+    { name: 'gemini-pro', apiVersion: 'v1alpha' },
+    { name: 'gemini-1.0-pro', apiVersion: 'v1alpha' },
+    
+    // Try other model names
+    { name: 'gemini-1.5-pro', apiVersion: 'v1beta' },
+    { name: 'models/gemini-1.5-pro', apiVersion: 'v1beta' },
+    { name: 'gemini-1.5-flash', apiVersion: 'v1beta' },
+    { name: 'models/gemini-1.5-flash', apiVersion: 'v1beta' },
   ];
-  
-  for (const modelName of models) {
+
+  for (const test of modelTests) {
     try {
-      console.log(`🤖 Trying model: ${modelName}`);
-      const model = genAI.getGenerativeModel({ model: modelName });
+      console.log(`🔍 Testing: ${test.name} (${test.apiVersion || 'default'})`);
+      
+      // Create new instance with specific API version
+      const testGenAI = test.apiVersion 
+        ? new GoogleGenerativeAI(GEMINI_API_KEY, {
+            apiVersion: test.apiVersion
+          })
+        : new GoogleGenerativeAI(GEMINI_API_KEY);
+      
+      const model = testGenAI.getGenerativeModel({ model: test.name });
       const result = await model.generateContent(prompt);
       const response = await result.response;
       const text = response.text();
       
-      console.log(`✅ SUCCESS with model: ${modelName}`);
+      console.log(`🎉 SUCCESS with: ${test.name} (${test.apiVersion || 'default'})`);
       return {
         success: true,
         text: text,
-        model: modelName
+        model: test.name,
+        apiVersion: test.apiVersion
       };
     } catch (error) {
-      console.log(`❌ Model ${modelName} failed:`, error.message.substring(0, 100));
-      // Continue to next model
+      console.log(`❌ Failed ${test.name}:`, error.message.substring(0, 80));
+      // Continue to next
+      await new Promise(resolve => setTimeout(resolve, 50)); // Small delay
     }
   }
   
   return {
     success: false,
-    error: 'All Gemini models failed'
+    error: 'All model configurations failed'
   };
 }
 
@@ -352,16 +266,17 @@ router.post('/chat', aiLimiter, async (req, res) => {
     console.log(`📤 Gemini request: "${message.substring(0, 50)}..."`);
     
     try {
-      // Try multiple Gemini models
+      // Try multiple Gemini models with different configurations
       const aiResult = await tryGeminiModels(fullPrompt);
       
       if (aiResult.success) {
-        console.log(`✅ Gemini response using ${aiResult.model}`);
+        console.log(`✅ Gemini response using ${aiResult.model} (${aiResult.apiVersion || 'default'})`);
         
         return res.json({
           success: true,
           response: aiResult.text,
           source: `gemini-${aiResult.model}`,
+          apiVersion: aiResult.apiVersion,
           timestamp: new Date().toISOString()
         });
       } else {
@@ -435,20 +350,20 @@ router.post('/chat/library', aiLimiter, async (req, res) => {
     }
 
     try {
-      const model = genAI.getGenerativeModel({ 
-        model: "gemini-pro"  // Updated to common model
-      });
+      // Use the comprehensive testing for library endpoint too
+      const aiResult = await tryGeminiModels(enhancedPrompt);
       
-      const result = await model.generateContent(enhancedPrompt);
-      const response = await result.response;
-      const text = response.text();
-
-      res.json({
-        success: true,
-        response: text,
-        source: "gemini-library",
-        timestamp: new Date().toISOString()
-      });
+      if (aiResult.success) {
+        res.json({
+          success: true,
+          response: aiResult.text,
+          source: `gemini-library-${aiResult.model}`,
+          apiVersion: aiResult.apiVersion,
+          timestamp: new Date().toISOString()
+        });
+      } else {
+        throw new Error('Library AI failed');
+      }
 
     } catch (aiError) {
       console.log('Library AI failed:', aiError.message);
@@ -479,10 +394,13 @@ router.get('/models', async (req, res) => {
       available: [
         { name: "gemini-pro", description: "Most common free tier model" },
         { name: "gemini-1.0-pro", description: "Legacy pro model" },
-        { name: "models/gemini-pro", description: "Alternative format" }
+        { name: "models/gemini-pro", description: "Alternative format" },
+        { name: "text-bison-001", description: "Legacy text model" },
+        { name: "chat-bison-001", description: "Legacy chat model" }
       ],
       recommended: "gemini-pro",
       status: genAI ? "configured" : "not-configured",
+      api_versions: ["v1beta", "v1", "v1alpha"],
       note: "Free tier has rate limits. Fallback responses available."
     };
     
@@ -512,26 +430,12 @@ router.get('/status', async (req, res) => {
         "POST /api/gemini/chat",
         "POST /api/gemini/chat/library", 
         "GET /api/gemini/models",
-        "GET /api/gemini/status"
+        "GET /api/gemini/status",
+        "GET /api/gemini/discover-models",
+        "GET /api/gemini/test-api"
       ],
       timestamp: new Date().toISOString()
     };
-    
-    // Test Gemini if configured
-    if (genAI) {
-      try {
-        const model = genAI.getGenerativeModel({ model: "gemini-pro" });
-        const testPrompt = "Say 'OK' if working";
-        const result = await model.generateContent(testPrompt);
-        const response = await result.response;
-        
-        status.gemini_test = "working";
-        status.test_response = response.text().substring(0, 50);
-      } catch (testError) {
-        status.gemini_test = "failed";
-        status.test_error = testError.message.substring(0, 100);
-      }
-    }
     
     res.json({
       success: true,
@@ -547,7 +451,98 @@ router.get('/status', async (req, res) => {
   }
 });
 
-// Add this debug endpoint
+// Model discovery endpoint
+router.get('/discover-models', async (req, res) => {
+  try {
+    if (!genAI) {
+      return res.json({
+        success: false,
+        error: "Gemini not initialized"
+      });
+    }
+
+    const testModels = [
+      'gemini-pro',
+      'gemini-1.0-pro', 
+      'text-bison-001',
+      'gemini-1.5-flash'
+    ];
+    
+    const results = [];
+    
+    for (const modelName of testModels) {
+      try {
+        const model = genAI.getGenerativeModel({ model: modelName });
+        const result = await model.generateContent("Say 'Model Test'");
+        const response = await result.response;
+        
+        results.push({
+          model: modelName,
+          status: "WORKING",
+          response: response.text().substring(0, 50)
+        });
+      } catch (error) {
+        results.push({
+          model: modelName,
+          status: "FAILED",
+          error: error.message.substring(0, 100)
+        });
+      }
+      
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    
+    res.json({
+      success: true,
+      results: results,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    res.json({
+      success: false,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Emergency test endpoint
+router.get('/emergency-test', async (req, res) => {
+  try {
+    const key = process.env.GEMINI_API_KEY;
+    if (!key) {
+      return res.json({ error: "No API key" });
+    }
+
+    // Test with v1beta
+    const testAI = new GoogleGenerativeAI(key, { apiVersion: 'v1beta' });
+    const model = testAI.getGenerativeModel({ model: "gemini-pro" });
+    
+    const result = await model.generateContent("Hello UBLC Library");
+    const response = await result.response;
+    const text = response.text();
+
+    res.json({
+      success: true,
+      message: "🎉 GEMINI AI IS WORKING!",
+      response: text,
+      key_length: key.length,
+      key_preview: key.substring(0, 10) + "...",
+      api_version: "v1beta",
+      model: "gemini-pro"
+    });
+
+  } catch (error) {
+    res.json({
+      success: false,
+      error: error.message,
+      suggestion: "1. Enable API 2. Check key restrictions 3. Wait 5 minutes 4. Try different API version"
+    });
+  }
+});
+
+// API key test endpoint
 router.get('/test-api', async (req, res) => {
   try {
     const key = process.env.GEMINI_API_KEY;
@@ -561,33 +556,50 @@ router.get('/test-api', async (req, res) => {
       });
     }
 
-    // Test the API key directly
-    const testAI = new GoogleGenerativeAI(key);
-    const model = testAI.getGenerativeModel({ model: "gemini-pro" });
+    // Test with multiple configurations
+    const configurations = [
+      { version: 'v1beta', model: 'gemini-pro' },
+      { version: 'v1', model: 'gemini-pro' },
+      { version: null, model: 'gemini-pro' },
+      { version: 'v1beta', model: 'text-bison-001' }
+    ];
     
-    try {
-      const result = await model.generateContent("Say 'TEST OK'");
-      const response = await result.response;
-      const text = response.text();
+    const results = [];
+    
+    for (const config of configurations) {
+      try {
+        const testAI = config.version 
+          ? new GoogleGenerativeAI(key, { apiVersion: config.version })
+          : new GoogleGenerativeAI(key);
+        
+        const model = testAI.getGenerativeModel({ model: config.model });
+        const result = await model.generateContent("Test");
+        const response = await result.response;
+        
+        results.push({
+          configuration: `${config.model} (${config.version || 'default'})`,
+          status: "SUCCESS",
+          response: response.text().substring(0, 30)
+        });
+      } catch (error) {
+        results.push({
+          configuration: `${config.model} (${config.version || 'default'})`,
+          status: "FAILED",
+          error: error.message.substring(0, 80)
+        });
+      }
       
-      res.json({
-        success: true,
-        message: "Gemini API is WORKING!",
-        response: text,
-        key_length: keyLength,
-        key_preview: key.substring(0, 15) + "...",
-        model: "gemini-pro"
-      });
-    } catch (aiError) {
-      res.json({
-        success: false,
-        error: "Gemini API call failed",
-        details: aiError.message,
-        key_length: keyLength,
-        key_preview: key.substring(0, 15) + "...",
-        suggestion: "Check: 1) API key validity 2) Quota 3) API enabled in Google Cloud"
-      });
+      await new Promise(resolve => setTimeout(resolve, 50));
     }
+    
+    res.json({
+      success: true,
+      key_exists: keyExists,
+      key_length: keyLength,
+      key_preview: key ? key.substring(0, 15) + "..." : "N/A",
+      test_results: results,
+      timestamp: new Date().toISOString()
+    });
     
   } catch (error) {
     res.json({
