@@ -49,12 +49,16 @@ const booksRouter = require('./src/routes/books');
 const reserveRouter = require('./src/routes/reserve');
 const geminiRouter = require('./src/routes/gemini');
 const chatRouter = require('./src/routes/chat');
+const huggingfaceRoutes = require('./src/routes/huggingface');
+
 
 // Routes
 app.use('/api/books', booksRouter);
 app.use('/api/reserve', reserveRouter);
 app.use('/api/gemini', geminiRouter);
-app.use('/api/chat', chatRouter);
+app.use('/api/chat', huggingfaceRoutes); 
+app.use('/api/huggingface', huggingfaceRoutes);
+
 
 // Health check endpoint (for Render.com monitoring)
 app.get('/health', (req, res) => {
