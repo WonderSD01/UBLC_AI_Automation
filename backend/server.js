@@ -1,118 +1,268 @@
-require('dotenv').config();
+// server.js - Updated with correct imports
 const express = require('express');
+const cors = require('cors');
 const rateLimit = require('express-rate-limit');
+require('dotenv').config();
 
-// Create Express app
 const app = express();
 
-// Manual CORS middleware
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per windowMs
+  message: 'Too many requests from this IP, please try again later.'
+});
+
+// Apply rate limiting to all requests
+app.use(limiter);
+
+// CORS configuration
+app.use(cors({
+  origin: [
+    'http://localhost:3000',
+    'http://localhost:5678', // n8n default port
+    'http://localhost:8080',
+    'https://ublc-ai-automation-1.onrender.com', // Your render.com domain
+    'https://*.onrender.com'
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+}));
+
+// Middleware
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Logging middleware
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+  const timestamp = new Date().toISOString();
+  console.log(`[${timestamp}] ${req.method} ${req.url}`);
+  if (req.body && Object.keys(req.body).length > 0) {
+    console.log('Request Body:', JSON.stringify(req.body, null, 2).substring(0, 500));
   }
   next();
 });
 
-app.use(express.json({ limit: '10mb' }));
+// Import routes from src/routes/
+const booksRouter = require('./src/routes/books');
+const reserveRouter = require('./src/routes/reserve');
+const geminiRouter = require('./src/routes/gemini');
+const chatRouter = require('./src/routes/chat');
 
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100
+// Routes
+app.use('/api/books', booksRouter);
+app.use('/api/reserve', reserveRouter);
+app.use('/api/gemini', geminiRouter);
+app.use('/api/chat', chatRouter);
+
+// Health check endpoint (for Render.com monitoring)
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    status: 'UP',
+    timestamp: new Date().toISOString(),
+    service: 'UBLC Library Backend',
+    version: '1.0.0',
+    environment: process.env.NODE_ENV || 'development'
+  });
 });
-app.use(limiter);
 
-// Import routes
-const chatRoutes = require('./src/routes/chat');
-const booksRoutes = require('./src/routes/books');
-const reserveRoutes = require('./src/routes/reserve');
-const geminiRoutes = require('./src/routes/gemini');
-
-// Use routes
-app.use('/api/chat', chatRoutes);
-app.use('/api/books', booksRoutes);
-app.use('/api/reserve', reserveRoutes);
-app.use('/api/gemini', geminiRoutes);
-
-// Health check endpoint
-app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    message: 'UBLC AI Automation Backend is running',
+// System info endpoint
+app.get('/api/system-info', (req, res) => {
+  const info = {
+    success: true,
+    service: 'UBLC Library Backend',
+    version: '1.0.0',
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
-    config: {
-      openai: !!process.env.OPENAI_API_KEY,
-      gemini: !!process.env.GEMINI_API_KEY,
-      sendgrid: !!process.env.SENDGRID_API_KEY,
-      sheets: !!process.env.GOOGLE_SHEET_ID
+    services: {
+      google_sheets: {
+        configured: !!process.env.GOOGLE_SHEET_ID,
+        sheet_id: process.env.GOOGLE_SHEET_ID ? 'Configured' : 'Not configured',
+        service_account: !!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL
+      },
+      gemini_ai: {
+        configured: !!process.env.GEMINI_API_KEY,
+        key_present: process.env.GEMINI_API_KEY ? 'Yes' : 'No'
+      },
+      email: {
+        configured: !!process.env.SENDGRID_API_KEY,
+        from_email: process.env.EMAIL_FROM || 'Not configured'
+      }
+    },
+    endpoints: {
+      books: '/api/books',
+      reserve: '/api/reserve',
+      chat: '/api/chat',
+      gemini: '/api/gemini'
     }
-  });
+  };
+  
+  res.json(info);
+});
+
+// Test Google Sheets connection endpoint
+app.get('/api/test-sheets', async (req, res) => {
+  try {
+    const dataService = require('./src/services/dataService');
+    const books = await dataService.readBooks();
+    
+    const response = {
+      success: true,
+      message: `Connected successfully. Found ${books.length} books.`,
+      books_count: books.length,
+      sample_books: books.slice(0, 3),
+      using_mock_data: books.some(b => b.bookId === 'B001' || b.bookId === 'B002'),
+      google_sheets_configured: !!process.env.GOOGLE_SHEET_ID,
+      timestamp: new Date().toISOString()
+    };
+    
+    res.json(response);
+  } catch (error) {
+    console.error('Test sheets error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      message: 'Failed to connect to Google Sheets',
+      using_mock_data: true,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Test reservation endpoint
+app.post('/api/test-reservation', async (req, res) => {
+  try {
+    const { bookId = 'B001', studentId = 'TEST123', studentName = 'Test Student', studentEmail = 'test@ub.edu.ph' } = req.body;
+    
+    const dataService = require('./src/services/dataService');
+    
+    // Check book availability
+    const books = await dataService.readBooks();
+    const book = books.find(b => b.bookId === bookId);
+    
+    if (!book) {
+      return res.status(404).json({
+        success: false,
+        message: `Book ${bookId} not found`
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: 'Reservation test endpoint',
+      book: {
+        id: book.bookId,
+        title: book.title,
+        available_copies: book.copies_available,
+        can_reserve: book.copies_available > 0
+      },
+      student: {
+        id: studentId,
+        name: studentName,
+        email: studentEmail
+      },
+      test_data: {
+        google_sheets_id: process.env.GOOGLE_SHEET_ID || 'Not configured',
+        service_account: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ? 'Configured' : 'Not configured'
+      }
+    });
+  } catch (error) {
+    console.error('Test reservation error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
 });
 
 // Root endpoint
 app.get('/', (req, res) => {
   res.json({
-    message: 'Welcome to UBLC AI Automation System',
+    success: true,
+    message: 'UBLC Library Backend API',
     version: '1.0.0',
     endpoints: {
-      health: '/api/health',
-      books: '/api/books',
-      reserve: '/api/reserve',
-      gemini: '/api/gemini/chat',
-      chat: '/api/chat'
-    }
+      books: '/api/books - GET books list',
+      reserve: '/api/reserve - POST make reservation',
+      chat: '/api/chat - POST chat with library assistant',
+      gemini: '/api/gemini/chat - POST AI chat',
+      health: '/health - GET system health',
+      info: '/api/system-info - GET system information',
+      test_sheets: '/api/test-sheets - GET test Google Sheets connection'
+    },
+    documentation: 'See README.md for API documentation',
+    timestamp: new Date().toISOString()
   });
 });
 
-// FIXED 404 handler - Use a simple middleware without '*'
-app.use((req, res, next) => {
-  // If no routes have handled the request, it's a 404
-  if (!res.headersSent) {
-    res.status(404).json({
-      success: false,
-      error: 'Endpoint not found',
-      message: `Route ${req.method} ${req.originalUrl} not found`,
-      availableEndpoints: [
-        'GET /',
-        'GET /api/health',
-        'GET /api/books',
-        'POST /api/chat',
-        'POST /api/reserve',
-        'POST /api/gemini/chat'
-      ]
-    });
-  }
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    error: 'Endpoint not found',
+    requested_url: req.url,
+    method: req.method,
+    available_endpoints: [
+      'GET  /',
+      'GET  /health',
+      'GET  /api/system-info',
+      'GET  /api/books',
+      'POST /api/reserve',
+      'POST /api/chat',
+      'POST /api/gemini/chat',
+      'GET  /api/test-sheets'
+    ]
+  });
 });
 
 // Error handling middleware
-app.use((error, req, res, next) => {
-  console.error('Server Error:', error);
-  res.status(500).json({
+app.use((err, req, res, next) => {
+  console.error('Global error handler:', err);
+  
+  const statusCode = err.statusCode || 500;
+  const message = err.message || 'Internal server error';
+  
+  res.status(statusCode).json({
     success: false,
-    error: 'Internal server error',
-    message: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong'
+    error: message,
+    timestamp: new Date().toISOString(),
+    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
   });
 });
 
+// Start server
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`\n🚀 UBLC Backend running on http://localhost:${PORT}`);
-  console.log('\n📋 Configuration Check:');
-  console.log(`   OpenAI: ${process.env.OPENAI_API_KEY ? '✅' : '❌'}`);
-  console.log(`   Gemini: ${process.env.GEMINI_API_KEY ? '✅' : '❌'}`);
-  console.log(`   SendGrid: ${process.env.SENDGRID_API_KEY ? '✅' : '❌'}`);
-  console.log(`   Google Sheets: ${process.env.GOOGLE_SHEET_ID ? '✅' : '❌'}`);
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`
+🚀 UBLC Library Backend Server Started!
+=========================================
+🌐 Server URL: http://localhost:${PORT}
+📊 Google Sheets: ${process.env.GOOGLE_SHEET_ID ? '✅ Configured' : '❌ NOT CONFIGURED'}
+🤖 Gemini AI: ${process.env.GEMINI_API_KEY ? '✅ Configured' : '❌ NOT CONFIGURED'}
+📧 Email Service: ${process.env.SENDGRID_API_KEY ? '✅ Configured' : '❌ NOT CONFIGURED'}
+
+📋 Available Endpoints:
+   • GET  /                   - API Information
+   • GET  /health             - Health Check
+   • GET  /api/system-info    - System Information
+   • GET  /api/books          - List all books
+   • POST /api/reserve        - Make reservation
+   • POST /api/chat           - Chat endpoint
+   • POST /api/gemini/chat    - AI Chat endpoint
+   • GET  /api/test-sheets    - Test Google Sheets
+
+🔧 Environment: ${process.env.NODE_ENV || 'development'}
+⏰ Started: ${new Date().toISOString()}
+=========================================
+  `);
   
-  console.log('\n🔗 Available Endpoints:');
-  console.log(`   Health Check: http://localhost:${PORT}/api/health`);
-  console.log(`   Chat API: http://localhost:${PORT}/api/chat`);
-  console.log(`   Books API: http://localhost:${PORT}/api/books`);
-  console.log(`   Reserve API: http://localhost:${PORT}/api/reserve`);
-  console.log(`   Gemini API: http://localhost:${PORT}/api/gemini/chat`);
-  console.log('\n💡 Tip: Test with: curl http://localhost:3000/api/health\n');
+  // Log warning if using mock data
+  if (!process.env.GOOGLE_SHEET_ID) {
+    console.warn('\n⚠️  WARNING: Google Sheets not configured. Using mock data.');
+    console.warn('   Set GOOGLE_SHEET_ID in .env file to use real Google Sheets.\n');
+  }
 });
+
+module.exports = app;
