@@ -118,6 +118,43 @@ router.get('/discover-models', async (req, res) => {
   }
 });
 
+router.get('/emergency-test', async (req, res) => {
+  try {
+    const key = process.env.GEMINI_API_KEY;
+    if (!key) {
+      return res.json({ error: "No API key" });
+    }
+
+    // Simple direct test
+    const { GoogleGenerativeAI } = require("@google/generative-ai");
+    const genAI = new GoogleGenerativeAI(key);
+    
+    // Try the most basic model
+    const model = genAI.getGenerativeModel({ 
+      model: "gemini-pro" 
+    });
+    
+    const result = await model.generateContent("Hello UBLC Library");
+    const response = await result.response;
+    const text = response.text();
+
+    res.json({
+      success: true,
+      message: "🎉 GEMINI AI IS WORKING!",
+      response: text,
+      key_length: key.length,
+      key_preview: key.substring(0, 10) + "..."
+    });
+
+  } catch (error) {
+    res.json({
+      success: false,
+      error: error.message,
+      suggestion: "1. Enable API 2. Check key restrictions 3. Wait 5 minutes"
+    });
+  }
+});
+
 // LIBRARY-ONLY PROMPT WITH EXACT BOOK CATEGORIES
 const libraryPrompt = `
 You are UBLC Library Assistant - a helpful AI for University of Batangas Lipa Campus library.
