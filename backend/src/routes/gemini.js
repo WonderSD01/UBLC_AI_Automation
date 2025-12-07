@@ -6,8 +6,40 @@ const rateLimit = require('express-rate-limit');
 const router = express.Router();
 
 // Check if Gemini API key is available
+// At the top of gemini.js, replace the genAI initialization:
+
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const genAI = GEMINI_API_KEY ? new GoogleGenerativeAI(GEMINI_API_KEY) : null;
+let genAI = null;
+
+if (GEMINI_API_KEY) {
+  try {
+    // Try v1beta first (most common)
+    genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+    console.log('✅ Gemini initialized with default API');
+  } catch (error) {
+    console.log('❌ Default init failed:', error.message);
+    
+    // Try with explicit configuration
+    try {
+      genAI = new GoogleGenerativeAI(GEMINI_API_KEY, {
+        apiVersion: 'v1beta'
+      });
+      console.log('✅ Gemini initialized with v1beta');
+    } catch (error2) {
+      console.log('❌ v1beta init failed:', error2.message);
+      
+      // Try v1alpha
+      try {
+        genAI = new GoogleGenerativeAI(GEMINI_API_KEY, {
+          apiVersion: 'v1alpha'
+        });
+        console.log('✅ Gemini initialized with v1alpha');
+      } catch (error3) {
+        console.log('❌ All initialization attempts failed');
+      }
+    }
+  }
+}
 
 // Rate limiting to prevent quota issues
 const aiLimiter = rateLimit({
@@ -20,6 +52,70 @@ const aiLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
+});
+
+// Add this endpoint to discover available models
+router.get('/discover-models', async (req, res) => {
+  try {
+    if (!genAI) {
+      return res.json({
+        success: false,
+        error: "Gemini not initialized"
+      });
+    }
+
+    // Try to list models (if API supports it)
+    const testPrompts = [
+      "Say 'Model Test 1'",
+      "Say 'Model Test 2'",
+      "Say 'Model Test 3'"
+    ];
+    
+    const testModels = [
+      'gemini-pro',
+      'gemini-1.0-pro', 
+      'text-bison-001',
+      'gemini-1.5-flash'
+    ];
+    
+    const results = [];
+    
+    for (const modelName of testModels) {
+      try {
+        const model = genAI.getGenerativeModel({ model: modelName });
+        const result = await model.generateContent(testPrompts[0]);
+        const response = await result.response;
+        
+        results.push({
+          model: modelName,
+          status: "WORKING",
+          response: response.text().substring(0, 50)
+        });
+      } catch (error) {
+        results.push({
+          model: modelName,
+          status: "FAILED",
+          error: error.message.substring(0, 100)
+        });
+      }
+      
+      // Small delay between tests
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    
+    res.json({
+      success: true,
+      results: results,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    res.json({
+      success: false,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
 });
 
 // LIBRARY-ONLY PROMPT WITH EXACT BOOK CATEGORIES
@@ -137,11 +233,31 @@ What would you like to know about? You can ask about:
 
 // Try different Gemini models in order - FIXED with common models
 async function tryGeminiModels(prompt) {
-  // Common Gemini model names that usually work
+  // Try ALL possible model names and formats
   const models = [
-    'gemini-pro',           // Most common free tier model
-    'gemini-1.0-pro',       // Alternative
-    'models/gemini-pro'     // Some APIs need this format
+    // Common models
+    'gemini-pro',
+    'models/gemini-pro',
+    'gemini-1.0-pro',
+    'models/gemini-1.0-pro',
+    'gemini-1.5-pro',
+    'models/gemini-1.5-pro',
+    
+    // Flash models
+    'gemini-1.5-flash',
+    'models/gemini-1.5-flash',
+    'gemini-1.5-flash-001',
+    'models/gemini-1.5-flash-001',
+    
+    // Legacy/text models
+    'text-bison-001',
+    'models/text-bison-001',
+    'chat-bison-001',
+    'models/chat-bison-001',
+    
+    // Try with different API versions
+    'gemini-pro:generateContent',
+    'gemini-1.0-pro:generateContent'
   ];
   
   for (const modelName of models) {
@@ -150,13 +266,16 @@ async function tryGeminiModels(prompt) {
       const model = genAI.getGenerativeModel({ model: modelName });
       const result = await model.generateContent(prompt);
       const response = await result.response;
+      const text = response.text();
+      
+      console.log(`✅ SUCCESS with model: ${modelName}`);
       return {
         success: true,
-        text: response.text(),
+        text: text,
         model: modelName
       };
     } catch (error) {
-      console.log(`❌ Model ${modelName} failed:`, error.message);
+      console.log(`❌ Model ${modelName} failed:`, error.message.substring(0, 100));
       // Continue to next model
     }
   }
