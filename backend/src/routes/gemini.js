@@ -391,4 +391,55 @@ router.get('/status', async (req, res) => {
   }
 });
 
+// Add this debug endpoint
+router.get('/test-api', async (req, res) => {
+  try {
+    const key = process.env.GEMINI_API_KEY;
+    const keyExists = !!key;
+    const keyLength = key ? key.length : 0;
+    
+    if (!keyExists) {
+      return res.json({
+        success: false,
+        error: "API key not found in environment"
+      });
+    }
+
+    // Test the API key directly
+    const testAI = new GoogleGenerativeAI(key);
+    const model = testAI.getGenerativeModel({ model: "gemini-pro" });
+    
+    try {
+      const result = await model.generateContent("Say 'TEST OK'");
+      const response = await result.response;
+      const text = response.text();
+      
+      res.json({
+        success: true,
+        message: "Gemini API is WORKING!",
+        response: text,
+        key_length: keyLength,
+        key_preview: key.substring(0, 15) + "...",
+        model: "gemini-pro"
+      });
+    } catch (aiError) {
+      res.json({
+        success: false,
+        error: "Gemini API call failed",
+        details: aiError.message,
+        key_length: keyLength,
+        key_preview: key.substring(0, 15) + "...",
+        suggestion: "Check: 1) API key validity 2) Quota 3) API enabled in Google Cloud"
+      });
+    }
+    
+  } catch (error) {
+    res.json({
+      success: false,
+      error: "Debug error",
+      details: error.message
+    });
+  }
+});
+
 module.exports = router;
