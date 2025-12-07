@@ -176,6 +176,7 @@ async function decrementCopyInGoogleSheets(bookId) {
     return false;
   }
 }
+
 // Function to log reservation to Google Sheets
 async function logReservationToGoogleSheets(reservationData) {
   const sheetId = process.env.GOOGLE_SHEET_ID;
@@ -189,17 +190,16 @@ async function logReservationToGoogleSheets(reservationData) {
     console.log(`📝 Logging reservation to Google Sheets: ${reservationData.reservationId}`);
     
     const sheets = await authenticateGoogleSheets();
-    
-    // Append to Reservations sheet
+
     const values = [[
-      reservationData.reservationId,
-      reservationData.bookId,
-      reservationData.title,
-      reservationData.studentId,
-      reservationData.studentName,
-      reservationData.studentEmail,
-      new Date().toISOString(),
-      'reserved'
+      reservationData.reservationId,    // A: reservationId
+      reservationData.bookId,          // B: bookId
+      reservationData.title,           // C: title
+      reservationData.studentName,     // D: studentName ← FIXED
+      reservationData.studentEmail,    // E: studentEmail ← FIXED
+      reservationData.studentId,       // F: studentId ← FIXED
+      new Date().toISOString(),        // G: timestamp
+      'reserved'                       // H: status
     ]];
 
     await sheets.spreadsheets.values.append({
