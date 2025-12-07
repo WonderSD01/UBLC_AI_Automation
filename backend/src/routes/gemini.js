@@ -1,4 +1,4 @@
-// src/routes/gemini.js - UPDATED with error handling and fallback
+// src/routes/gemini.js - UPDATED with correct Gemini model names
 const express = require('express');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const rateLimit = require('express-rate-limit');
@@ -135,13 +135,13 @@ What would you like to know about? You can ask about:
 - Borrowing policies and fees`;
 }
 
-// Try different Gemini models in order
+// Try different Gemini models in order - FIXED with common models
 async function tryGeminiModels(prompt) {
-  // Correct model names for v1beta API
+  // Common Gemini model names that usually work
   const models = [
-    'gemini-1.5-flash-001',      // Updated model name
-    'gemini-1.5-pro-001',        // Updated model name
-    'gemini-1.0-pro-001'         // Updated model name
+    'gemini-pro',           // Most common free tier model
+    'gemini-1.0-pro',       // Alternative
+    'models/gemini-pro'     // Some APIs need this format
   ];
   
   for (const modelName of models) {
@@ -279,9 +279,9 @@ router.post('/chat/library', aiLimiter, async (req, res) => {
     }
 
     try {
-const model = genAI.getGenerativeModel({ 
-  model: "gemini-1.5-flash-001"  // Updated
-});
+      const model = genAI.getGenerativeModel({ 
+        model: "gemini-pro"  // Updated to common model
+      });
       
       const result = await model.generateContent(enhancedPrompt);
       const response = await result.response;
@@ -319,16 +319,16 @@ const model = genAI.getGenerativeModel({
 // GET /api/gemini/models - List available models
 router.get('/models', async (req, res) => {
   try {
-const models = {
-  available: [
-    { name: "gemini-1.5-flash-001", description: "Fast, versatile model" },
-    { name: "gemini-1.5-pro-001", description: "Higher quality, slower" },
-    { name: "gemini-1.0-pro-001", description: "Legacy pro model" }
-  ],
-  recommended: "gemini-1.5-flash-001",
-  status: genAI ? "configured" : "not-configured",
-  note: "Free tier has rate limits. Fallback responses available."
-};
+    const models = {
+      available: [
+        { name: "gemini-pro", description: "Most common free tier model" },
+        { name: "gemini-1.0-pro", description: "Legacy pro model" },
+        { name: "models/gemini-pro", description: "Alternative format" }
+      ],
+      recommended: "gemini-pro",
+      status: genAI ? "configured" : "not-configured",
+      note: "Free tier has rate limits. Fallback responses available."
+    };
     
     res.json({
       success: true,
@@ -364,7 +364,7 @@ router.get('/status', async (req, res) => {
     // Test Gemini if configured
     if (genAI) {
       try {
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const model = genAI.getGenerativeModel({ model: "gemini-pro" });
         const testPrompt = "Say 'OK' if working";
         const result = await model.generateContent(testPrompt);
         const response = await result.response;
