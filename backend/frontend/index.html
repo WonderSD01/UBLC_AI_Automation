@@ -1,0 +1,758 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UBLC Intelligent Chatbot System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+       
+        :root {
+            --ublc-maroon: #8b0000;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f4f7f9;
+        }
+        .header-bg {
+            background-color: var(--ublc-maroon);
+        }
+        .text-ublc-maroon {
+            color: var(--ublc-maroon);
+        }
+        .primary-btn {
+            background-color: #0d6efd;
+            transition: all 0.2s;
+        }
+        .primary-btn:hover {
+            background-color: #0b5ed7;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+        }
+        .ai-message {
+            background-color: #e0f2fe;
+            border-radius: 1rem 1rem 1rem 0;
+        }
+        .user-message {
+            background-color: #d1e7dd;
+            border-radius: 1rem 1rem 0 1rem;
+        }
+        #chat-box::-webkit-scrollbar {
+            width: 8px;
+        }
+        #chat-box::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        .suggestion-box {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            padding: 8px 0;
+            margin-top: 10px;
+        }
+        .suggestion-button {
+            background-color: #42a5f5;
+            color: white;
+            border: none;
+            padding: 10px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.9em;
+            text-align: left;
+            transition: background-color 0.2s;
+        }
+        .suggestion-button:hover {
+            background-color: #1e88e5;
+        }
+        #main-content {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-grow: 1;
+            padding: 0;
+        }
+        #chat-main-container {
+            width: 100%;
+            height: 100%;
+            max-width: 800px;
+            max-height: calc(100vh - 120px);
+        }
+        .chat-centered-window {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            border-radius: 1rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+        }
+        /* Student info modal */
+        .student-info-modal {
+            background: rgba(0, 0, 0, 0.5);
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        .student-info-content {
+            background: white;
+            padding: 2rem;
+            border-radius: 1rem;
+            max-width: 500px;
+            width: 90%;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+<script>
+// -- 1. CONFIGURATION --
+const API_BASE_URL = 'https://ublic-backend.onrender.com';
+
+// Centralized State Object
+const APP_STATE = {
+    currentPage: 'chat',
+    loading: false,
+    error: null,
+    books: [],
+    selectedBook: null,
+    reservationData: {
+        studentId: '',
+        studentName: '',
+        studentEmail: ''
+    },
+    // Store student info for chat sessions
+    studentInfo: {
+        studentId: '',
+        name: '',
+        email: ''
+    },
+    hasStudentInfo: false,
+    chatHistory: [
+        { 
+            sender: 'AI', 
+            text: "Hello! I'm your UBLC Intelligent Assistant. I can help you with Library inquiries, book reservations, and more. Please provide your student information first so I can assist you better." 
+        }
+    ],
+    showStudentInfoModal: true, // Show modal on start
+    isModalOpen: false,
+    modalContent: {
+        title: '',
+        message: ''
+    },
+    currentSessionId: null,
+    lastReservationIntent: null
+};
+
+// -- 2. UTILITY FUNCTIONS --
+function getIcon(name, className = 'w-5 h-5') {
+    const icons = {
+        'Book': '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="' + className + '"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"></path></svg>',
+        'Search': '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="' + className + '"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>',
+        'ChevronLeft': '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="' + className + '"><path d="m15 18-6-6 6-6"></path></svg>',
+        'MessageCircle': '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="' + className + '"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"></path></svg>',
+        'CheckCircle': '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="' + className + '"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><path d="m9 11 3 3L22 4"></path></svg>',
+        'XCircle': '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="' + className + '"><circle cx="12" cy="12" r="10"></circle><path d="m15 9-6 6"></path><path d="m9 9 6 6"></path></svg>',
+        'Loader': '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="' + className + ' animate-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>',
+        'User': '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="' + className + '"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>'
+    };
+    return icons[name] || '';
+}
+
+function openModal(title, message, isSuccess = true) {
+    APP_STATE.modalContent = { title, message, isSuccess };
+    APP_STATE.isModalOpen = true;
+    render();
+}
+
+function closeModal() {
+    APP_STATE.isModalOpen = false;
+    render();
+}
+
+function closeStudentInfoModal() {
+    APP_STATE.showStudentInfoModal = false;
+    render();
+}
+
+function saveStudentInfo() {
+    const studentId = document.getElementById("modal-student-id").value.trim();
+    const name = document.getElementById("modal-student-name").value.trim();
+    const email = document.getElementById("modal-student-email").value.trim();
+
+    if (!studentId || !name || !email || !email.includes("@")) {
+        alert("Please fill all fields with valid information");
+        return;
+    }
+
+    APP_STATE.studentInfo = { studentId, name, email };
+    APP_STATE.hasStudentInfo = true;
+    APP_STATE.showStudentInfoModal = false;
+
+    // Update chat history
+    APP_STATE.chatHistory.push({
+        sender: 'AI',
+        text: `Thank you ${name}! Now I can help you with book reservations. How can I assist you today?`
+    });
+    render();
+}
+
+// --- 3. API SERVICE FUNCTIONS ---
+async function apiFetch(endpoint, options = {}) {
+    APP_STATE.loading = true;
+    render();
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+            ...options,
+            headers: {
+                'Content-Type': 'application/json',
+                ...options.headers
+            }
+        });
+
+        if (!response.ok) {
+            let errorDetails = `HTTP error! status: ${response.status}`;
+            try {
+                const errorBody = await response.json();
+                errorDetails += ` (${errorBody.message || errorBody.error})`;
+            } catch (e) {}
+            throw new Error(errorDetails);
+        }
+
+        const data = await response.json();
+        APP_STATE.loading = false;
+        return data;
+    } catch (error) {
+        console.error('API Error:', error);
+        APP_STATE.error = `Could not connect to the backend: ${error.message}`;
+        APP_STATE.loading = false;
+        openModal('Connection Error', `Failed to connect to the backend API: ${error.message}. Please try again later.`, false);
+        render();
+        return { success: false, message: error.message };
+    }
+}
+
+async function fetchBooks() {
+    APP_STATE.error = null;
+    const data = await apiFetch('/api/books');
+    if (data && Array.isArray(data)) {
+        APP_STATE.books = data;
+    } else if (!APP_STATE.error) {
+        APP_STATE.error = 'Failed to load books. The response was unexpected.';
+    }
+    render();
+}
+
+async function reserveBook() {
+    if (!APP_STATE.selectedBook) return;
+    
+    const { studentId, studentName, studentEmail } = APP_STATE.reservationData;
+    
+    if (!studentId || !studentName || !studentEmail || !/\S+@\S+\.\S+/.test(studentEmail)) {
+        openModal('Validation Error', 'Please complete all required fields with a valid UB Email.', false);
+        return;
+    }
+    
+    const payload = { 
+        bookId: APP_STATE.selectedBook.bookId, 
+        studentId, 
+        studentName, 
+        studentEmail 
+    };
+    
+    const result = await apiFetch('/api/reserve', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+    });
+    
+    if (result.success) {
+        openModal('Reservation Successful!', `Thank you, ${studentName}. Your book "${APP_STATE.selectedBook.title}" has been reserved! Your Reservation ID is: ${result.reservationId}.`, true);
+        APP_STATE.currentPage = 'list';
+        APP_STATE.selectedBook = null;
+        APP_STATE.reservationData = { studentId: '', studentName: '', studentEmail: '' };
+        fetchBooks();
+    } else {
+        openModal('Reservation Failed', result.message || 'An unknown error occurred during reservation.', false);
+    }
+    render();
+}
+
+async function sendChatMessage(message) {
+    const userMessage = { sender: 'User', text: message };
+    APP_STATE.chatHistory.push(userMessage);
+    render();
+    
+    const chatBox = document.getElementById('chat-box');
+    if (chatBox) chatBox.scrollTop = chatBox.scrollHeight;
+
+    // Check if we have student info
+    if (!APP_STATE.hasStudentInfo && message.toLowerCase().includes('reserve')) {
+        APP_STATE.chatHistory.push({
+            sender: 'AI',
+            text: "I need your student information first to help with reservations. Please click the 'Add Student Info' button above."
+        });
+        render();
+        return;
+    }
+
+    try {
+        APP_STATE.loading = true;
+        render();
+
+        // Use the correct chat endpoint based on your backend
+        const result = await apiFetch('/api/chat', {
+            method: 'POST',
+            body: JSON.stringify({
+                message: message,
+                student: APP_STATE.hasStudentInfo ? APP_STATE.studentInfo : null,
+                sessionId: APP_STATE.currentSessionId
+            })
+        });
+
+        if (result.success) {
+            // Update session ID if provided
+            if (result.sessionId) {
+                APP_STATE.currentSessionId = result.sessionId;
+            }
+
+            // Handle reservation flow responses
+            let aiResponse = result.reply || result.response || "I'm here to help!";
+            
+            // Check for reservation completion
+            if (result.reservationComplete) {
+                aiResponse = `🎉 **Reservation Confirmed!**\n\nReservation ID: ${result.reservationId}\n\n${aiResponse}`;
+                APP_STATE.currentSessionId = null; // Clear session after completion
+            }
+            
+            // Check if we need student info
+            if (result.requiresStudentInfo && !APP_STATE.hasStudentInfo) {
+                aiResponse += "\n\n⚠️ I need your student information first. Please click 'Add Student Info' above.";
+            }
+            
+            APP_STATE.chatHistory.push({ sender: 'AI', text: aiResponse });
+            
+            // Store reservation intent for UI handling
+            if (result.reservationIntent) {
+                APP_STATE.lastReservationIntent = {
+                    wantsReservation: true,
+                    requiresStudentInfo: result.requiresStudentInfo || false,
+                    bookTitle: result.bookTitle
+                };
+                
+                // Auto-navigate to book list if reservation intent detected
+                if (result.bookTitle && !result.requiresStudentInfo && APP_STATE.hasStudentInfo) {
+                    const mentionedBook = APP_STATE.books.find(book => 
+                        book.title.toLowerCase().includes(result.bookTitle.toLowerCase())
+                    );
+                    if (mentionedBook) {
+                        setTimeout(() => {
+                            APP_STATE.selectedBook = mentionedBook;
+                            APP_STATE.reservationData = {
+                                studentId: APP_STATE.studentInfo.studentId,
+                                studentName: APP_STATE.studentInfo.name,
+                                studentEmail: APP_STATE.studentInfo.email
+                            };
+                            APP_STATE.currentPage = 'reserve';
+                            render();
+                        }, 2000);
+                    }
+                }
+            }
+        } else {
+            APP_STATE.chatHistory.push({
+                sender: 'AI',
+                text: 'Error: Could not process your request. Please try again.'
+            });
+        }
+    } catch (e) {
+        console.error('Chat error:', e);
+        APP_STATE.chatHistory.push({
+            sender: 'AI',
+            text: 'Error: Could not reach the AI service. Please check your network.'
+        });
+    }
+
+    APP_STATE.loading = false;
+    render();
+    
+    const chatBoxAfter = document.getElementById('chat-box');
+    if (chatBoxAfter) {
+        chatBoxAfter.scrollTop = chatBoxAfter.scrollHeight;
+    }
+}
+
+// -- 4. UI HANDLERS --
+function handleReserveClick(book) {
+    APP_STATE.selectedBook = book;
+    APP_STATE.currentPage = 'reserve';
+    APP_STATE.reservationData = {
+        studentId: APP_STATE.studentInfo.studentId || '',
+        studentName: APP_STATE.studentInfo.name || '',
+        studentEmail: APP_STATE.studentInfo.email || ''
+    };
+    render();
+}
+
+function handleInputChange(event) {
+    APP_STATE.reservationData[event.target.name] = event.target.value;
+}
+
+function handleSuggestionClick(event) {
+    const target = event.target;
+    if (target.classList.contains('suggestion-button')) {
+        const message = target.textContent.trim();
+        if (message && !APP_STATE.loading) {
+            sendChatMessage(message);
+        }
+    }
+}
+
+function handleChatSubmit(event) {
+    event.preventDefault();
+    const input = document.getElementById('chat-input');
+    const message = input.value.trim();
+    if (message && !APP_STATE.loading) {
+        sendChatMessage(message);
+        input.value = "";
+    }
+}
+
+function switchToChat() {
+    APP_STATE.currentPage = 'chat';
+    render();
+}
+
+function switchToList() {
+    APP_STATE.currentPage = 'list';
+    fetchBooks();
+    render();
+}
+
+function updateStudentInfo() {
+    APP_STATE.showStudentInfoModal = true;
+    render();
+}
+
+// -- 5. RENDERING FUNCTIONS --
+function renderStudentInfoModal() {
+    if (!APP_STATE.showStudentInfoModal) return '';
+    
+    return `
+    <div class="student-info-modal">
+        <div class="student-info-content">
+            <h3 class="text-xl font-bold text-gray-800 mb-4">Student Information</h3>
+            <p class="text-gray-600 mb-4">Please provide your student details to use reservation features:</p>
+            
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-gray-700 mb-1">Student ID</label>
+                <input type="text" id="modal-student-id" 
+                    class="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                    placeholder="e.g., 2220122" 
+                    value="${APP_STATE.studentInfo.studentId}">
+            </div>
+            
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
+                <input type="text" id="modal-student-name" 
+                    class="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                    placeholder="e.g., Maria Santos"
+                    value="${APP_STATE.studentInfo.name}">
+            </div>
+            
+            <div class="mb-6">
+                <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                <input type="email" id="modal-student-email" 
+                    class="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                    placeholder="e.g., 2220122@ub.edu.ph"
+                    value="${APP_STATE.studentInfo.email}">
+            </div>
+            
+            <div class="flex gap-2">
+                <button onclick="saveStudentInfo()"
+                    class="flex-1 primary-btn text-white py-2 rounded-lg">
+                    ${APP_STATE.hasStudentInfo ? 'Update Info' : 'Save & Continue'}
+                </button>
+                <button onclick="closeStudentInfoModal()"
+                    class="flex-1 bg-gray-300 text-gray-700 py-2 rounded-lg">
+                    ${APP_STATE.hasStudentInfo ? 'Cancel' : 'Skip for Now'}
+                </button>
+            </div>
+        </div>
+    </div>`;
+}
+
+function renderBookList() {
+    if (APP_STATE.loading && APP_STATE.books.length === 0) {
+        return '<div class="text-center p-8">' + getIcon('Loader', 'w-8 h-8 mx-auto text-blue-500') + '<p class="mt-2 text-gray-600">Loading book catalog...</p></div>';
+    }
+    
+    if (APP_STATE.error) {
+        return '<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-xl relative shadow-md" role="alert"><strong class="font-bold">Error!</strong><span class="block sm:inline"> ' + APP_STATE.error + '</span></div>';
+    }
+    
+    if (APP_STATE.books.length === 0) {
+        return '<div class="text-center p-8 bg-white rounded-xl shadow-lg"><p class="text-gray-500">No books found in the catalog.</p></div>';
+    }
+    
+    return `
+    <div class="max-w-7xl mx-auto p-4 md:p-8">
+        <button onclick="switchToChat()" class="text-gray-600 hover:text-gray-800 flex items-center mb-6 transition">
+            ${getIcon('ChevronLeft', 'w-5 h-5 mr-2')} 
+            Back to Chat Assistant
+        </button>
+        <h2 class="text-2xl font-bold text-gray-700 mb-6">Library Catalog</h2>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            ${APP_STATE.books.map(book => `
+                <div class="book-card bg-white p-6 rounded-xl shadow-lg hover:shadow-xl transition duration-300 flex flex-col justify-between">
+                    <div>
+                        <div class="flex items-start justify-between mb-3">
+                            <h3 class="text-xl font-semibold text-gray-800">${book.title}</h3>
+                            <span class="text-sm font-medium ${book.copies_available > 0 ? 'text-green-600 bg-green-100' : 'text-red-600 bg-red-100'} px-3 py-1 rounded-full whitespace-nowrap">${book.copies_available} available</span>
+                        </div>
+                        <p class="text-gray-500 italic mb-4">By ${book.author}</p>
+                        <p class="text-gray-600 text-sm mb-4">Location: ${book.location || 'UBLC Library'}</p>
+                    </div>
+                    <div class="mt-4">
+                        <button
+                            class="primary-btn w-full text-white font-semibold py-2 px-4 rounded-lg shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+                            onclick="handleReserveClick(${JSON.stringify(book).replace(/"/g, '&quot;')})"
+                            ${book.copies_available <= 0 ? 'disabled' : ''}>
+                            ${getIcon('Book', 'w-5 h-5 mr-2')}
+                            ${book.copies_available > 0 ? 'Reserve Now' : 'Out of Stock'}
+                        </button>
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+    </div>`;
+}
+
+function renderReservationForm() {
+    const book = APP_STATE.selectedBook;
+    if (!book) {
+        setTimeout(() => { APP_STATE.currentPage = 'list'; render(); }, 0);
+        return '<div class="text-center p-8">Redirecting...</div>';
+    }
+    
+    return `
+    <div class="max-w-3xl mx-auto bg-white p-8 rounded-xl shadow-2xl">
+        <button onclick="APP_STATE.currentPage = 'list'; render();" class="text-gray-600 hover:text-gray-800 flex items-center mb-6 transition">
+            ${getIcon('ChevronLeft', 'w-5 h-5 mr-2')}
+            Back to Catalog
+        </button>
+        <h2 class="text-3xl font-bold text-gray-700 mb-2">Book Reservation</h2>
+        <p class="text-xl text-blue-600 font-medium mb-6">"${book.title}"</p>
+        <div class="border-l-4 border-blue-500 pl-4 py-3 mb-8 bg-blue-50 rounded-lg">
+            <p class="text-gray-600">Author: <span class="font-semibold">${book.author}</span></p>
+            <p class="text-gray-600">Copies Available: <span class="font-semibold text-green-700">${book.copies_available}</span></p>
+            <p class="text-gray-600">Location: <span class="font-semibold">${book.location || 'UBLC Library'}</span></p>
+        </div>
+        
+        <form id="reservation-form" onsubmit="event.preventDefault(); reserveBook();">
+            <h3 class="text-xl font-semibold text-gray-700 mb-4 border-b pb-2">Your Information</h3>
+            <div class="mb-5">
+                <label for="studentId" class="block text-sm font-medium text-gray-700 mb-1">Student ID (Required)</label>
+                <input type="text" id="studentId" name="studentId" 
+                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                    value="${APP_STATE.reservationData.studentId}"
+                    oninput="handleInputChange(event)" required>
+            </div>
+            <div class="mb-5">
+                <label for="studentName" class="block text-sm font-medium text-gray-700 mb-1">Full Name (Required)</label>
+                <input type="text" id="studentName" name="studentName" 
+                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                    value="${APP_STATE.reservationData.studentName}"
+                    oninput="handleInputChange(event)" required>
+            </div>
+            <div class="mb-6">
+                <label for="studentEmail" class="block text-sm font-medium text-gray-700 mb-1">UB Email (Required)</label>
+                <input type="email" id="studentEmail" name="studentEmail" 
+                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                    value="${APP_STATE.reservationData.studentEmail}"
+                    oninput="handleInputChange(event)" required>
+            </div>
+            <button type="submit" class="primary-btn w-full text-white font-bold py-3 px-4 rounded-lg text-lg shadow-xl hover:shadow-2xl flex items-center justify-center ${APP_STATE.loading ? 'disabled:opacity-50' : ''}" ${APP_STATE.loading ? 'disabled' : ''}>
+                ${APP_STATE.loading ? getIcon('Loader', 'w-6 h-6 mr-2') : getIcon('CheckCircle', 'w-6 h-6 mr-2')}
+                ${APP_STATE.loading ? 'Processing...' : 'Confirm Reservation'}
+            </button>
+        </form>
+    </div>`;
+}
+
+function renderChatMain() {
+    const chatBoxContent = APP_STATE.chatHistory.map(msg => `
+        <div class="flex ${msg.sender === 'User' ? 'justify-end' : 'justify-start'} mb-4">
+            <div class="max-w-xs md:max-w-md lg:max-w-xl p-3 rounded-xl shadow-md ${msg.sender === 'User' ? 'user-message text-gray-800' : 'ai-message text-gray-800'}">
+                ${msg.text.replace(/\n/g, '<br>')}
+            </div>
+        </div>
+    `).join('');
+    
+    const suggestionButtons = APP_STATE.chatHistory.length <= 2 ? `
+        <div class="suggestion-box" onclick="handleSuggestionClick(event)">
+            <button class="suggestion-button">What programming books are available?</button>
+            <button class="suggestion-button">Reserve Programming in C for me</button>
+            <button class="suggestion-button">Show me the library catalog</button>
+            <button class="suggestion-button">What are the library hours?</button>
+        </div>
+    ` : '';
+    
+    return `
+    <div id="chat-main-container" class="bg-white rounded-xl shadow-2xl mx-auto my-4 flex flex-col h-full">
+        <div class="header-bg text-white p-4 rounded-t-xl flex justify-between items-center">
+            <div class="flex items-center">
+                ${getIcon('MessageCircle', 'w-5 h-5 mr-2')}
+                <h3 class="font-bold text-lg">UBLC Intelligent Assistant</h3>
+            </div>
+            <div class="flex gap-2">
+                <button onclick="updateStudentInfo()" class="bg-white text-ubic-maroon font-semibold py-1 px-3 rounded-lg shadow hover:opacity-90 transition flex items-center text-sm">
+                    ${getIcon('User', 'w-4 h-4 mr-1')}
+                    ${APP_STATE.hasStudentInfo ? 'Update Info' : 'Add Student Info'}
+                </button>
+                <button onclick="switchToList()" class="bg-white text-ubic-maroon font-semibold py-1 px-3 rounded-lg shadow hover:opacity-90 transition flex items-center text-sm">
+                    ${getIcon('Book', 'w-4 h-4 mr-1')} View Catalog
+                </button>
+            </div>
+        </div>
+        
+        <div id="chat-box" class="h-full overflow-y-auto p-4 flex flex-col space-y-4 flex-grow">
+            ${chatBoxContent}
+            ${suggestionButtons}
+            ${APP_STATE.loading ? '<div class="flex justify-start mb-4"><div class="ai-message text-gray-800 p-3 rounded-xl shadow-md flex items-center"><span class="mr-2">Thinking...</span>' + getIcon('Loader', 'w-4 h-4') + '</div></div>' : ''}
+        </div>
+        
+        <form onsubmit="handleChatSubmit(event)" class="p-4 border-t flex">
+            <input type="text" id="chat-input" placeholder="Ask about books or make a reservation..."
+                class="flex-grow px-3 py-2 border border-gray-300 rounded-l-lg focus:outline-none focus:border-blue-500"
+                ${APP_STATE.loading ? 'disabled' : ''}>
+            <button type="submit" class="primary-btn text-white px-4 py-2 rounded-r-lg ${APP_STATE.loading ? 'disabled:opacity-50' : ''}"
+                ${APP_STATE.loading ? 'disabled' : ''}>
+                ${getIcon('Search', 'w-5 h-5')}
+            </button>
+        </form>
+        
+        ${!APP_STATE.hasStudentInfo ? 
+            '<div class="bg-yellow-50 border border-yellow-200 p-3 text-center text-yellow-800 text-sm">Please add your student information to use reservation features.</div>' : 
+            ''}
+    </div>`;
+}
+
+function renderModal() {
+    if (!APP_STATE.isModalOpen) return '';
+    
+    const { title, message, isSuccess } = APP_STATE.modalContent;
+    const icon = isSuccess ? getIcon('CheckCircle', 'w-10 h-10') : getIcon('XCircle', 'w-10 h-10');
+    const iconColor = isSuccess ? 'text-green-500' : 'text-red-500';
+    const buttonColor = isSuccess ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700';
+    
+    return `
+    <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100]" onclick="closeModal()">
+        <div class="bg-white p-8 rounded-xl shadow-2xl max-w-sm w-full mx-4 transform scale-100 transition-transform duration-300" onclick="event.stopPropagation()">
+            <div class="text-center mb-6">
+                <div class="mx-auto ${iconColor} mb-4">${icon}</div>
+                <h3 class="text-xl font-bold text-gray-800">${title}</h3>
+            </div>
+            <p class="text-gray-600 text-center mb-6 whitespace-pre-wrap">${message}</p>
+            <button onclick="closeModal()" class="w-full ${buttonColor} text-white font-semibold py-2 rounded-lg transition">
+                Close
+            </button>
+        </div>
+    </div>`;
+}
+
+function render() {
+    const app = document.getElementById('app');
+    const modalContainer = document.getElementById('modal-container');
+    const studentModalContainer = document.getElementById('student-modal-container');
+
+    if (APP_STATE.currentPage === 'chat') {
+        app.innerHTML = renderChatMain();
+    } else if (APP_STATE.currentPage === 'list') {
+        app.innerHTML = renderBookList();
+    } else if (APP_STATE.currentPage === 'reserve') {
+        app.innerHTML = renderReservationForm();
+    }
+
+    if (modalContainer) {
+        modalContainer.innerHTML = renderModal();
+    }
+
+    if (studentModalContainer) {
+        studentModalContainer.innerHTML = renderStudentInfoModal();
+    }
+
+    if (APP_STATE.currentPage === 'chat') {
+        setTimeout(() => {
+            const chatBox = document.getElementById('chat-box');
+            if (chatBox) {
+                chatBox.scrollTop = chatBox.scrollHeight;
+            }
+        }, 10);
+    }
+}
+
+// --- 6. INITIALIZATION ---
+window.onload = () => {
+    const mainContent = document.getElementById('main-content');
+    mainContent.innerHTML = `
+        <div id="app" class="h-full w-full"></div>
+        <div id="modal-container"></div>
+        <div id="student-modal-container"></div>
+    `;
+
+    // Make functions available globally
+    window.APP_STATE = APP_STATE;
+    window.handleReserveClick = handleReserveClick;
+    window.handleInputChange = handleInputChange;
+    window.reserveBook = reserveBook;
+    window.handleChatSubmit = handleChatSubmit;
+    window.closeModal = closeModal;
+    window.handleSuggestionClick = handleSuggestionClick;
+    window.switchToChat = switchToChat;
+    window.switchToList = switchToList;
+    window.updateStudentInfo = updateStudentInfo;
+    window.saveStudentInfo = saveStudentInfo;
+    window.closeStudentInfoModal = closeStudentInfoModal;
+
+    fetchBooks();
+    render();
+};
+</script>
+
+    <header class="header-bg shadow-lg flex-shrink-0">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+            <div class="flex items-center space-x-3">
+                <div class="h-10 w-10 rounded-full overflow-hidden bg-white flex items-center justify-center">
+                    <img src="ublc-logo.png" alt="UBLC Logo" class="h-full w-full object-contain">
+                </div>
+                <div>
+                    <h1 class="text-2xl font-extrabold text-white">UBLC Intelligent Chatbot & Automation System</h1>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main id="main-content" class="flex-grow w-full">
+        <div class="text-center p-16">
+            <p class="text-gray-500">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-6 h-6 mx-auto animate-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
+                Initializing Intelligent Assistant...
+            </p>
+        </div>
+    </main>
+
+    <footer class="bg-gray-100 border-t mt-auto flex-shrink-0">
+        <div class="max-w-7xl mx-auto py-4 px-4 sm:px-6 lg:px-8 text-center text-gray-500 text-sm">
+            &copy; 2025 UBLC AI Automation Project. All rights reserved.
+        </div>
+    </footer>
+
+</body>
+
+</html>
