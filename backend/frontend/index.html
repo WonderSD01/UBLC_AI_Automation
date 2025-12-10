@@ -306,7 +306,7 @@ async function sendChatMessage(message) {
         render();
 
         // Use the correct chat endpoint based on your backend
-        const result = await apiFetch('/api/chat', {
+const result = await apiFetch('/api/gemini/chat', {
             method: 'POST',
             body: JSON.stringify({
                 message: message,

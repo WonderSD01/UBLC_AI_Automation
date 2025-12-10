@@ -1,11 +1,84 @@
+// gemini.js - UPDATED VERSION
 const express = require('express');
 const router = express.Router();
 const rateLimit = require('express-rate-limit');
 
+// Import shared session management
+const sessionManager = require('./sessionManager');
+const {
+    generateSessionId,
+    getSession,
+    clearSession,
+    hasReservationIntent,
+    extractBookTitle,
+    processReservationFlow
+} = sessionManager;
+
+// ---
+// FETCH REAL BOOKS FROM YOUR API
+// ---
+async function fetchRealBooks() {
+    try {
+        console.log('$ Fetching real books from API...');
+        
+        // Your live API endpoint
+        const response = await fetch('https://ubic-ai-automation-1.onrender.com/api/books');
+        
+        if (!response.ok) {
+            console.warn(`API responded with status: ${response.status}`);
+            return getFallbackBooks();
+        }
+        
+        const books = await response.json();
+        
+        if (!Array.isArray(books)) {
+            console.warn('API did not return an array');
+            return getFallbackBooks();
+        }
+        
+        console.log(`✓ Successfully fetched ${books.length} real books`);
+        return books;
+        
+    } catch (error) {
+        console.error('✗ Failed to fetch real books:', error.message);
+        return getFallbackBooks();
+    }
+}
+
+function getFallbackBooks() {
+    console.log('⚠ Using fallback book data');
+    return [
+        {
+            bookId: "B001",
+            title: "Programming in C",
+            author: "Dennis Ritchie",
+            copies_available: 5,
+            location: "2nd Floor - Section A",
+            category: "Programming"
+        },
+        {
+            bookId: "B002",
+            title: "Data Structures and Algorithms",
+            author: "Robert Sedgewick",
+            copies_available: 3,
+            location: "2nd Floor - Section A",
+            category: "Computer Science"
+        },
+        {
+            bookId: "B003",
+            title: "Python Programming",
+            author: "Mark Lutz",
+            copies_available: 9,
+            location: "2nd Floor - Section A",
+            category: "Programming"
+        }
+    ];
+}
+
 // Rate limiting
 const apiLimiter = rateLimit({
-    windowMs: 60 * 1000, // 1 minute
-    max: 30, // 30 requests per minute per IP
+    windowMs: 60 * 1000,
+    max: 30,
     message: {
         success: false,
         error: 'Too many AI requests. Please wait a moment.',
@@ -15,52 +88,8 @@ const apiLimiter = rateLimit({
     legacyHeaders: false,
 });
 
-// ============================================
-// SESSION MANAGEMENT (ADD THIS SECTION)
-// ============================================
-const sessions = {};
-
-function generateSessionId() {
-  return 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-}
-
-function getSession(sessionId) {
-  if (!sessions[sessionId]) {
-    sessions[sessionId] = {
-      currentFlow: null,
-      step: null,
-      data: {},
-      conversationHistory: [],
-      createdAt: new Date().toISOString()
-    };
-  }
-  return sessions[sessionId];
-}
-
-function clearSession(sessionId) {
-  if (sessionId && sessions[sessionId]) {
-    delete sessions[sessionId];
-  }
-}
-
-// Mock book data matching your server
-const mockBooks = [
-  { title: "Programming in C", author: "Dennis Ritchie", copies_available: 5 },
-  { title: "Data Structures and Algorithms", author: "Robert Sedgewick", copies_available: 3 },
-  { title: "Python Programming", author: "Mark Lutz", copies_available: 9 },
-  { title: "Software Engineering", author: "Ian Sommerville", copies_available: 9 },
-  { title: "Introduction to Database Systems", author: "C.J. Date", copies_available: 3 },
-  { title: "Computer Networks", author: "Andrew Tanenbaum", copies_available: 5 },
-  { title: "Artificial Intelligence", author: "Stuart Russell", copies_available: 7 },
-  { title: "Web Development Fundamentals", author: "Jon Duckett", copies_available: 5 },
-  { title: "Operating Systems Concepts", author: "Abraham Silberschatz", copies_available: 4 },
-  { title: "Machine Learning Basics", author: "Andriy Burkov", copies_available: 8 }
-];
-
-// ============================================
-// ENHANCED LIBRARY PROMPT WITH RESERVATION LOGIC
-// ============================================
-const libraryPrompt = `You are UBLC Library Assistant - a helpful AI for University of Batangas Lipa Campus library.
+// Library prompt
+let libraryPrompt = `You are UBLC Library Assistant - a helpful AI for University of Batangas Lipa Campus library.
 
 IMPORTANT RESERVATION RULES:
 1. If user says "reserve [book name]" or similar:
@@ -68,100 +97,61 @@ IMPORTANT RESERVATION RULES:
    - If NO student info: Ask for: Student ID, Full Name, Email Address
    - If HAS student info: Confirm the reservation details
 
-2. BOOK CATALOG:
-   - Programming in C (5 copies)
-   - Data Structures and Algorithms (3 copies)
-   - Python Programming (9 copies)
-   - Software Engineering (9 copies)
-   - Introduction to Database Systems (3 copies)
-   - Computer Networks (5 copies)
-   - Artificial Intelligence (7 copies)
-   - Web Development Fundamentals (5 copies)
-   - Operating Systems Concepts (4 copies)
-   - Machine Learning Basics (8 copies)
+RESPONSE FORMATS:
+- Missing student info: "To reserve [book], I need: 1) Student ID, 2) Full Name, 3) Email Address"
+- Has student info: "Confirm: Student: [name], ID: [id], Email: [email]. Book: [book]. Reply 'yes' to confirm."
+- Successful reservation: "Reservation confirmed! ID: RES-[number]. Pick up at UBLC Library."
 
-3. RESPONSE FORMATS:
-   - Missing student info: "To reserve [book], I need: 1) Student ID, 2) Full Name, 3) Email Address"
-   - Has student info: "Confirm: Student: [name], ID: [id], Email: [email]. Book: [book]. Reply 'yes' to confirm."
-   - Successful reservation: "Reservation confirmed! ID: RES-[number]. Pick up at UBLC Library."
+GENERAL GUIDELINES:
+- Be friendly, professional, UBLC-focused
+- Guide users step-by-step
+- Library hours: Mon-Fri 8AM-5PM, Sat 9AM-12PM
+- Loan period: 7 days, max 2 books
+- Late fee: P10/day per book`;
 
-4. GENERAL GUIDELINES:
-   - Be friendly, professional, UBLC-focused
-   - Guide users step-by-step
-   - Only recommend books from our catalog
-   - Library hours: Mon-Fri 8AM-5PM
-   - Loan period: 7 days, max 2 books
-   - Late fee: ₱10/day per book`;
+// Update prompt with real books on startup
+async function updateLibraryPrompt() {
+    try {
+        const books = await fetchRealBooks();
+        
+        if (books.length > 0) {
+            const bookList = books.map(book =>
+                `• ${book.title} by ${book.author} (${book.copies_available} available)`
+            ).join('\n');
+            
+            libraryPrompt = `You are UBLC Library Assistant - a helpful AI for University of Batangas Lipa Campus library.
 
-// ============================================
-// FALLBACK RESPONSES (ENHANCED)
-// ============================================
-function getLibraryFallbackResponse(message, session = null) {
-  const msg = message.toLowerCase().trim();
+BOOK CATALOG:
+${bookList}
 
-  // Handle reservation flow if in session
-  if (session && session.currentFlow === 'reservation') {
-    if (session.step === 'collecting_info') {
-      return `To reserve "${session.data.bookTitle}", I need:
-1. **Student ID:**
-2. **Full Name:**
-3. **Email Address:**`;
+IMPORTANT RESERVATION RULES:
+1. If user says "reserve [book name]" or similar:
+   - Check if they provided student information
+   - If NO student info: Ask for: Student ID, Full Name, Email Address
+   - If HAS student info: Confirm the reservation details
+
+RESPONSE FORMATS:
+- Missing student info: "To reserve [book], I need: 1) Student ID, 2) Full Name, 3) Email Address"
+- Has student info: "Confirm: Student: [name], ID: [id], Email: [email]. Book: [book]. Reply 'yes' to confirm."
+- Successful reservation: "Reservation confirmed! ID: RES-[number]. Pick up at UBLC Library."
+
+GENERAL GUIDELINES:
+- Be friendly, professional, UBLC-focused
+- Guide users step-by-step
+- Library hours: Mon-Fri 8AM-5PM, Sat 9AM-12PM
+- Loan period: 7 days, max 2 books
+- Late fee: P10/day per book`;
+
+            console.log('✓ Updated library prompt with real books');
+        }
+    } catch (error) {
+        console.error('Failed to update prompt:', error);
     }
-    if (session.step === 'awaiting_confirmation') {
-      return `Please confirm your reservation:
-Book: ${session.data.bookTitle}
-Student: ${session.data.studentInfo.name}
-ID: ${session.data.studentInfo.studentId}
-Email: ${session.data.studentInfo.email}
-
-Reply "yes" to confirm or "no" to correct.`;
-    }
-  }
-
-  // Check for reservation intent
-  const hasReserveIntent = msg.includes('reserve') || msg.includes('borrow') || msg.includes('book me');
-  if (hasReserveIntent) {
-    // Extract book title
-    let bookTitle = null;
-    for (const book of mockBooks) {
-      if (msg.includes(book.title.toLowerCase())) {
-        bookTitle = book.title;
-        break;
-      }
-    }
-    
-    if (bookTitle) {
-      return `I can help you reserve "${bookTitle}"! Please provide:
-1. Student ID
-2. Full Name
-3. Email Address`;
-    }
-    return "Which book would you like to reserve? Available: Programming in C, Python Programming, Data Structures, etc.";
-  }
-
-  // Other common queries
-  if (msg.includes('programming') || msg.includes('code')) {
-    return "Programming books: Programming in C, Python Programming, Data Structures and Algorithms.";
-  }
-  
-  if (msg.includes('hour') || msg.includes('time') || msg.includes('open')) {
-    return "Library hours: Monday-Friday 8:00 AM - 5:00 PM, Saturday 9:00 AM - 12:00 PM";
-  }
-  
-  if (msg.includes('available') || msg.includes('book list') || msg.includes('catalog')) {
-    return "Available categories: Programming, Computer Science, Database, Networking, AI/ML, Web Development, Operating Systems, Software Engineering.";
-  }
-  
-  if (msg.includes('rule') || msg.includes('policy') || msg.includes('late')) {
-    return "Library policies: 7-day loan, 2 books maximum, ₱10/day late fee, reservations held for 3 days.";
-  }
-  
-  return "I'm here to help with UBLC library services! I can assist with book reservations, library information, and book searches.";
 }
 
-// ============================================
-// GEMINI API CALL
-// ============================================
+updateLibraryPrompt();
+
+// Gemini API call
 async function callGeminiAPI(prompt) {
     try {
         const apiKey = process.env.GEMINI_API_KEY;
@@ -170,7 +160,7 @@ async function callGeminiAPI(prompt) {
         }
 
         const url = `https://generativelanguage.googleapis.com/v1beta/models/gemma-3-4b-it:generateContent?key=${apiKey}`;
-        console.log(`📡 Calling Gemini API...`);
+        console.log('→ Calling Gemini API...');
 
         const response = await fetch(url, {
             method: 'POST',
@@ -179,9 +169,7 @@ async function callGeminiAPI(prompt) {
                 'Accept': 'application/json'
             },
             body: JSON.stringify({
-                contents: [{
-                    parts: [{ text: prompt }]
-                }],
+                contents: [{ parts: [{ text: prompt }] }],
                 generationConfig: {
                     temperature: 0.7,
                     maxOutputTokens: 1024,
@@ -190,24 +178,25 @@ async function callGeminiAPI(prompt) {
         });
 
         if (!response.ok) {
-            const errorText = await response.text();
             throw new Error(`Gemini API error: ${response.status}`);
         }
 
         const data = await response.json();
-        
-        if (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts[0]) {
+
+        if (data.candidates && data.candidates[0] &&
+            data.candidates[0].content &&
+            data.candidates[0].content.parts[0]) {
             return {
                 success: true,
                 text: data.candidates[0].content.parts[0].text,
-                model: "gemma-3-4b-it",
-                usage: data.usageMetadata || {}
+                model: "gemma-3-4b-it"
             };
         } else {
             throw new Error('Unexpected API response format');
         }
+
     } catch (error) {
-        console.error('❌ Gemini API call failed:', error.message);
+        console.error('✗ Gemini API call failed:', error.message);
         return {
             success: false,
             error: error.message,
@@ -216,143 +205,163 @@ async function callGeminiAPI(prompt) {
     }
 }
 
-// ============================================
-// MAIN CHAT ENDPOINT WITH RESERVATION SUPPORT
-// ============================================
-router.post('/chat', apiLimiter, async (req, res) => {
+// Fallback response
+function getFallbackResponse(message, session = null, books = []) {
+    const lowerMsg = message.toLowerCase();
+    
+    if (session && session.currentFlow === 'reservation') {
+        if (session.step === 'collecting_info') {
+            return `To reserve "${session.data.bookTitle}", I need:\n\n1. **Student ID:**\n2. **Full Name:**\n3. **Email Address:**`;
+        }
+        if (session.step === 'awaiting_confirmation') {
+            return `Please confirm: Is your information correct?\nStudent: ${session.data.studentInfo.name}\nID: ${session.data.studentInfo.studentId}\nEmail: ${session.data.studentInfo.email}\n\nReply "yes" to confirm or "no" to correct.`;
+        }
+    }
+    
+    if (hasReservationIntent(lowerMsg)) {
+        const bookTitle = extractBookTitle(message, books);
+        if (bookTitle) {
+            return `I can help you reserve "${bookTitle}"! Please provide your:\n\n1. Student ID\n2. Full Name\n3. Email Address`;
+        }
+        return "Which book would you like to reserve?";
+    }
+    
+    if (lowerMsg.includes('programming') || lowerMsg.includes('code')) {
+        const programmingBooks = books.filter(b =>
+            b.category === 'Programming' ||
+            b.title.includes('Programming') ||
+            b.title.includes('Python')
+        ).slice(0, 5);
+        
+        if (programmingBooks.length > 0) {
+            const bookList = programmingBooks.map(b =>
+                `• ${b.title} (${b.copies_available} available)`
+            ).join('\n');
+            return `We have programming books including:\n${bookList}`;
+        }
+        return "We have programming books: Programming in C, Python Programming, Data Structures and Algorithms.";
+    }
+    
+    if (lowerMsg.includes('hour') || lowerMsg.includes('time') || lowerMsg.includes('open')) {
+        return "Library hours: Monday-Friday 8:00 AM - 5:00 PM, Saturday 9:00 AM - 12:00 PM";
+    }
+    
+    if (lowerMsg.includes('available') || lowerMsg.includes('book list') || lowerMsg.includes('catalog')) {
+        if (books.length > 0) {
+            const categories = [...new Set(books.map(b => b.category).filter(Boolean))];
+            return `Available categories: ${categories.join(', ')}`;
+        }
+        return "We have books in Programming, Computer Science, Database, Networking, AI/ML, Web Development, Operating Systems, and Software Engineering.";
+    }
+    
+    if (lowerMsg.includes('rule') || lowerMsg.includes('policy') || lowerMsg.includes('late')) {
+        return "Library policies: 7-day loan, 2 books maximum, P10/day late fee, reservations held for 3 days.";
+    }
+    
+    return "I'm here to help with UBLC library services! I can assist with book reservations, library information, and book searches.";
+}
+
+// Function for library-specific fallback
+function getLibraryFallbackResponse(message, session = null) {
+    const books = getFallbackBooks();
+    return getFallbackResponse(message, session, books);
+}
+
+// ---
+// ENHANCED GEMINI CHAT HANDLER (Main handler for /api/chat)
+// ---
+const enhancedGeminiHandler = async (req, res) => {
     try {
         const { message, student, sessionId } = req.body;
-
-        if (!message) {
+        
+        if (!message || typeof message !== 'string') {
             return res.status(400).json({
                 success: false,
-                error: "Message is required",
+                error: "Valid message is required",
                 timestamp: new Date().toISOString()
             });
         }
-
-        // ============================================
-        // SESSION MANAGEMENT
-        // ============================================
+        
+        // 1. FETCH REAL BOOKS
+        const books = await fetchRealBooks();
+        
+        // 2. SESSION MANAGEMENT
         const currentSessionId = sessionId || generateSessionId();
         const session = getSession(currentSessionId);
         
-        // Add to conversation history
         session.conversationHistory.push({
             role: 'user',
             content: message,
             timestamp: new Date().toISOString()
         });
-
-        console.log(`📝 Session ${currentSessionId}: Flow=${session.currentFlow}, Step=${session.step}`);
-
-        // ============================================
-        // RESERVATION FLOW HANDLING
-        // ============================================
         
-        // Check if in reservation flow
+        console.log(`📱 [Gemini Enhanced] Session ${currentSessionId}: Flow=${session.currentFlow || 'none'}, Step=${session.step || 'none'}`);
+        
+        // 3. HANDLE RESERVATION FLOW FIRST (Priority)
         if (session.currentFlow === 'reservation') {
-            
-            // Collecting student info
             if (session.step === 'collecting_info') {
                 if (student && student.studentId && student.name && student.email) {
-                    // Store student info and ask for confirmation
                     session.data.studentInfo = student;
                     session.step = 'awaiting_confirmation';
                     
-                    const confirmationMessage = `✅ Thank you, ${student.name}!\n\nI have your request to reserve **"${session.data.bookTitle}"**.\n\n**Please confirm your details:**\n• Student ID: ${student.studentId}\n• Full Name: ${student.name}\n• Email: ${student.email}\n\nIs this correct? (Reply "yes" to confirm or "no" to correct)`;
+                    const confirmationMessage = `✓ Thank you, ${student.name}!\n\nI have your request to reserve **"${session.data.bookTitle}"**.\n\n**Please confirm your details:**\n• Student ID: ${student.studentId}\n• Full Name: ${student.name}\n• Email: ${student.email}\n\nIs this correct? (Reply "yes" to confirm or "no" to correct)`;
                     
                     return res.json({
                         success: true,
                         response: confirmationMessage,
                         sessionId: currentSessionId,
                         requiresConfirmation: true,
-                        source: "reservation-flow",
+                        source: "gemini-reservation-flow",
                         timestamp: new Date().toISOString()
                     });
                 } else {
-                    // Still need student info
-                    const infoRequest = `📚 To reserve **"${session.data.bookTitle}"**, I need:\n\n1. **Student ID:**\n2. **Full Name:**\n3. **Email Address:**`;
+                    const infoRequest = `✓ To reserve **"${session.data.bookTitle}"**, I need:\n\n1. **Student ID:**\n2. **Full Name:**\n3. **Email Address:**`;
                     
                     return res.json({
                         success: true,
                         response: infoRequest,
                         sessionId: currentSessionId,
                         requiresStudentInfo: true,
-                        source: "reservation-info-request",
+                        source: "gemini-reservation-info",
                         timestamp: new Date().toISOString()
                     });
                 }
             }
             
-            // Awaiting confirmation
             if (session.step === 'awaiting_confirmation') {
-                const lowerMessage = message.toLowerCase().trim();
-                
-                // User confirms
-                if (lowerMessage === 'yes' || lowerMessage.includes('correct') || lowerMessage.includes('confirm')) {
-                    // Process reservation
-                    const reservationId = 'RES-' + Date.now();
-                    const successMessage = `🎉 **RESERVATION CONFIRMED!**\n\n📚 **Book:** ${session.data.bookTitle}\n👤 **Student:** ${session.data.studentInfo.name} (${session.data.studentInfo.studentId})\n📧 **Email:** ${session.data.studentInfo.email}\n🔢 **Reservation ID:** ${reservationId}\n📅 **Pick-up by:** Within 3 days\n📍 **Location:** UBLC Main Library\n\n✅ Please present your Student ID at the library counter.`;
-                    
-                    // Clear session
-                    clearSession(currentSessionId);
-                    
+                const result = processReservationFlow(message, session, currentSessionId, books);
+                if (result) {
                     return res.json({
-                        success: true,
-                        response: successMessage,
-                        sessionId: null,
-                        reservationId: reservationId,
-                        reservationComplete: true,
-                        source: "reservation-complete",
-                        timestamp: new Date().toISOString()
-                    });
-                    
-                } else if (lowerMessage === 'no' || lowerMessage.includes('wrong')) {
-                    // User wants to correct info
-                    session.step = 'collecting_info';
-                    session.data.studentInfo = null;
-                    
-                    const correctionMessage = "Please provide the correct information:\n1. **Student ID:**\n2. **Full Name:**\n3. **Email Address:**";
-                    
-                    return res.json({
-                        success: true,
-                        response: correctionMessage,
-                        sessionId: currentSessionId,
-                        requiresStudentInfo: true,
-                        source: "reservation-correction",
+                        ...result,
+                        source: "gemini-reservation-confirmation",
                         timestamp: new Date().toISOString()
                     });
                 }
-                // If not yes/no, continue to AI response
             }
         }
-
-        // ============================================
-        // DETECT NEW RESERVATION INTENT
-        // ============================================
-        const hasReserveIntent = message.toLowerCase().includes('reserve') || 
-                                message.toLowerCase().includes('borrow') || 
-                                message.toLowerCase().includes('book me');
         
-        if (hasReserveIntent) {
-            // Extract book title
-            let bookTitle = null;
-            for (const book of mockBooks) {
-                if (message.toLowerCase().includes(book.title.toLowerCase())) {
-                    bookTitle = book.title;
-                    break;
-                }
-            }
+        // 4. DETECT NEW RESERVATION
+        if (hasReservationIntent(message)) {
+            const bookTitle = extractBookTitle(message, books);
             
             if (bookTitle) {
-                // Start new reservation flow
+                const book = books.find(b => b.title === bookTitle);
+                if (book && book.copies_available < 1) {
+                    return res.json({
+                        success: false,
+                        response: `Sorry, "${bookTitle}" is currently unavailable (${book.copies_available} copies).`,
+                        sessionId: currentSessionId,
+                        source: "gemini-reservation-unavailable",
+                        timestamp: new Date().toISOString()
+                    });
+                }
+                
                 session.currentFlow = 'reservation';
                 session.step = 'collecting_info';
                 session.data.bookTitle = bookTitle;
                 session.data.studentInfo = null;
                 
-                const infoRequest = `📚 I can reserve **"${bookTitle}"** for you!\n\nFirst, I need:\n1. **Student ID:**\n2. **Full Name:**\n3. **Email Address:**`;
+                const infoRequest = `✓ I can reserve **"${bookTitle}"** for you!\n\nFirst, I need:\n1. **Student ID:**\n2. **Full Name:**\n3. **Email Address:**${book ? `\n\n${book.copies_available} copies available` : ''}`;
                 
                 return res.json({
                     success: true,
@@ -360,72 +369,185 @@ router.post('/chat', apiLimiter, async (req, res) => {
                     sessionId: currentSessionId,
                     requiresStudentInfo: true,
                     reservationIntent: true,
-                    source: "new-reservation",
+                    source: "gemini-new-reservation",
                     timestamp: new Date().toISOString()
                 });
             }
         }
-
-        // ============================================
-        // REGULAR AI RESPONSE (Gemini API)
-        // ============================================
-        // Build prompt with context
-        let contextPrompt = libraryPrompt;
-        if (session.conversationHistory.length > 0) {
-            const recentHistory = session.conversationHistory
-                .slice(-3)
-                .map(msg => `${msg.role}: ${msg.content}`)
-                .join('\n');
-            contextPrompt += `\n\nRecent conversation:\n${recentHistory}\n\nUser: ${message}\nAssistant:`;
-        } else {
-            contextPrompt += `\n\nUser: ${message}\nAssistant:`;
-        }
-
-        // Try Gemini API
-        const aiResult = await callGeminiAPI(contextPrompt);
-
-        if (aiResult.success) {
-            return res.json({
-                success: true,
-                response: aiResult.text,
-                sessionId: currentSessionId,
-                source: `gemini-${aiResult.model}`,
-                model: aiResult.model,
-                usage: aiResult.usage,
-                timestamp: new Date().toISOString()
-            });
-        } else {
-            // Use fallback
-            const fallbackResponse = getLibraryFallbackResponse(message, session);
-            return res.json({
-                success: true,
-                response: fallbackResponse,
-                sessionId: currentSessionId,
-                source: "fallback",
-                note: `AI service limited: ${aiResult.error}`,
-                timestamp: new Date().toISOString()
-            });
-        }
-
-    } catch (error) {
-        console.error("General error in /chat:", error.message);
         
-        // Ultimate fallback
+        // 5. TRY GEMINI API FIRST (Main functionality)
+        console.log('→ Attempting Gemini API call...');
+        try {
+            let currentPrompt = libraryPrompt;
+            
+            // Add conversation history
+            if (session.conversationHistory.length > 0) {
+                const recentHistory = session.conversationHistory.slice(-3)
+                    .map(msg => `${msg.role}: ${msg.content}`)
+                    .join('\n');
+                currentPrompt += `\n\nRecent conversation:\n${recentHistory}\n\nUser: ${message}\nAssistant:`;
+            } else {
+                currentPrompt += `\n\nUser: ${message}\nAssistant:`;
+            }
+            
+            const aiResult = await callGeminiAPI(currentPrompt);
+            
+            if (aiResult.success) {
+                session.conversationHistory.push({
+                    role: 'assistant',
+                    content: aiResult.text,
+                    timestamp: new Date().toISOString()
+                });
+                
+                console.log('✓ Gemini API successful');
+                return res.json({
+                    success: true,
+                    response: aiResult.text,
+                    sessionId: currentSessionId,
+                    source: `gemini-${aiResult.model}`,
+                    model: aiResult.model,
+                    timestamp: new Date().toISOString()
+                });
+            } else {
+                console.log('⚠ Gemini API failed, falling back...');
+                throw new Error('Gemini API call failed');
+            }
+        } catch (geminiError) {
+            console.log(`⚠ Gemini attempt failed: ${geminiError.message}`);
+        }
+        
+        // 6. FALLBACK TO RULE-BASED (Only if Gemini fails)
+        console.log('→ Using rule-based fallback');
+        const fallbackResponse = getFallbackResponse(message, session, books);
+        
+        session.conversationHistory.push({
+            role: 'assistant',
+            content: fallbackResponse,
+            timestamp: new Date().toISOString()
+        });
+        
+        return res.json({
+            success: true,
+            response: fallbackResponse,
+            sessionId: currentSessionId,
+            source: "fallback-after-gemini",
+            geminiFailed: true,
+            note: 'Using rule-based fallback after Gemini failure',
+            timestamp: new Date().toISOString()
+        });
+        
+    } catch (error) {
+        console.error(`✗ General error in ${req.path}:`, error.message);
+        
         return res.json({
             success: true,
             response: "I'm here to help with UBLC library services! How can I assist you today?",
             sessionId: null,
-            source: "error-recovery",
+            source: "gemini-error-recovery",
             timestamp: new Date().toISOString()
         });
     }
-});
+};
 
-// ============================================
-// KEEP OTHER ENDPOINTS (unchanged)
-// ============================================
+// ---
+// PURE GEMINI HANDLER (No fallback, for /api/gemini-only/chat)
+// ---
+const pureGeminiHandler = async (req, res) => {
+    try {
+        const { message } = req.body;
+        
+        if (!message || typeof message !== 'string') {
+            return res.status(400).json({
+                success: false,
+                error: "Valid message is required",
+                timestamp: new Date().toISOString()
+            });
+        }
+        
+        console.log('→ Pure Gemini API call...');
+        const currentPrompt = `${libraryPrompt}\n\nUser: ${message}\nAssistant:`;
+        const aiResult = await callGeminiAPI(currentPrompt);
+        
+        if (aiResult.success) {
+            return res.json({
+                success: true,
+                response: aiResult.text,
+                source: `pure-gemini-${aiResult.model}`,
+                model: aiResult.model,
+                timestamp: new Date().toISOString()
+            });
+        } else {
+            return res.status(500).json({
+                success: false,
+                error: "Gemini API failed",
+                source: "pure-gemini-failed",
+                timestamp: new Date().toISOString()
+            });
+        }
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            error: error.message,
+            timestamp: new Date().toISOString()
+        });
+    }
+};
 
-// POST /api/gemini/chat/library - Library-specific endpoint
+// ---
+// FALLBACK-ONLY HANDLER (For /api/fallback-chat)
+// ---
+const fallbackOnlyHandler = async (req, res) => {
+    try {
+        const { message, sessionId } = req.body;
+        
+        if (!message) {
+            return res.status(400).json({
+                success: false,
+                error: "Message is required",
+                timestamp: new Date().toISOString()
+            });
+        }
+        
+        const books = await fetchRealBooks();
+        const currentSessionId = sessionId || generateSessionId();
+        const session = getSession(currentSessionId);
+        
+        const fallbackResponse = getFallbackResponse(message, session, books);
+        
+        return res.json({
+            success: true,
+            response: fallbackResponse,
+            sessionId: currentSessionId,
+            source: "pure-fallback",
+            note: 'Using rule-based fallback only',
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            error: error.message,
+            timestamp: new Date().toISOString()
+        });
+    }
+};
+
+// ---
+// REGISTER ENDPOINTS
+// ---
+
+// MAIN CHAT ENDPOINT: /api/chat (Gemini with fallback)
+router.post('/', apiLimiter, enhancedGeminiHandler);
+
+// GEMINI-ONLY ENDPOINT: /api/gemini/chat (Keep for backward compatibility)
+router.post('/chat', apiLimiter, enhancedGeminiHandler);
+
+// NEW: PURE GEMINI (no fallback)
+router.post('/gemini-only', apiLimiter, pureGeminiHandler);
+
+// NEW: FALLBACK ONLY (no Gemini)
+router.post('/fallback-only', apiLimiter, fallbackOnlyHandler);
+
+// Library-specific endpoint
 router.post('/chat/library', apiLimiter, async (req, res) => {
     try {
         const { message } = req.body;
@@ -436,27 +558,16 @@ router.post('/chat/library', apiLimiter, async (req, res) => {
                 timestamp: new Date().toISOString()
             });
         }
-
-        const enhancedPrompt = `${libraryPrompt}\n\nIMPORTANT: You are ONLY a library assistant.\n\nUser: ${message}\nAssistant:`;
-        const aiResult = await callGeminiAPI(enhancedPrompt);
-
-        if (aiResult.success) {
-            res.json({
-                success: true,
-                response: aiResult.text,
-                source: `gemini-library-${aiResult.model}`,
-                model: aiResult.model,
-                timestamp: new Date().toISOString()
-            });
-        } else {
-            res.json({
-                success: true,
-                response: getLibraryFallbackResponse(message),
-                source: "library-fallback",
-                note: "Library AI service limited",
-                timestamp: new Date().toISOString()
-            });
-        }
+        
+        const books = await fetchRealBooks();
+        const fallbackResponse = getFallbackResponse(message, null, books);
+        
+        res.json({
+            success: true,
+            response: fallbackResponse,
+            source: "library-fallback",
+            timestamp: new Date().toISOString()
+        });
     } catch (error) {
         res.status(500).json({
             success: false,
@@ -466,7 +577,7 @@ router.post('/chat/library', apiLimiter, async (req, res) => {
     }
 });
 
-// GET /api/gemini/test - Simple test endpoint
+// Test endpoint
 router.get('/test', async (req, res) => {
     try {
         const apiKey = process.env.GEMINI_API_KEY;
@@ -477,13 +588,12 @@ router.get('/test', async (req, res) => {
                 suggestion: "Add GEMINI_API_KEY to environment variables"
             });
         }
-
-        const testResult = await callGeminiAPI("Say 'UBLC Library AI is working!'");
         
+        const testResult = await callGeminiAPI("Say 'UBLC Library AI is working!'");
         if (testResult.success) {
             res.json({
                 success: true,
-                message: "✅ GEMINI API IS WORKING!",
+                message: "✓ GEMINI API IS WORKING!",
                 key_exists: true,
                 model: testResult.model,
                 test_response: testResult.text,
@@ -505,7 +615,7 @@ router.get('/test', async (req, res) => {
     }
 });
 
-// GET /api/gemini/status - Check Gemini API status
+// Status endpoint
 router.get('/status', async (req, res) => {
     try {
         const apiKey = process.env.GEMINI_API_KEY;
@@ -520,7 +630,7 @@ router.get('/status', async (req, res) => {
                 apiTest = "error";
             }
         }
-
+        
         res.json({
             success: true,
             gemini_configured: keyExists,
@@ -528,13 +638,13 @@ router.get('/status', async (req, res) => {
             rate_limiting: "30 requests/minute",
             fallback_enabled: true,
             model: "gemma-3-4b-it",
-            available_endpoints: [
-                "POST /api/gemini/chat",
-                "POST /api/gemini/chat/library",
-                "GET /api/gemini/test",
-                "GET /api/gemini/status"
-            ],
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            endpoints: {
+                main_chat: "/api/chat (Gemini with fallback)",
+                gemini_only: "/api/gemini/gemini-only (Pure Gemini)",
+                fallback_only: "/api/gemini/fallback-only (Fallback only)",
+                legacy: "/api/gemini/chat (Legacy)"
+            }
         });
     } catch (error) {
         res.status(500).json({
@@ -543,22 +653,6 @@ router.get('/status', async (req, res) => {
             timestamp: new Date().toISOString()
         });
     }
-});
-
-// GET /api/gemini/models - List available models
-router.get('/models', (req, res) => {
-    res.json({
-        success: true,
-        models: [
-            {
-                name: "gemma-3-4b-it",
-                description: "Gemma 3 4B - CONFIRMED WORKING",
-                status: "recommended"
-            }
-        ],
-        current_model: "gemma-3-4b-it",
-        timestamp: new Date().toISOString()
-    });
 });
 
 module.exports = router;

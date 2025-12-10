@@ -50,14 +50,19 @@ app.use((req, res, next) => {
 // Import routes from src/routes/
 const booksRouter = require('./src/routes/books');
 const reserveRouter = require('./src/routes/reserve');
-const geminiRouter = require('./src/routes/gemini');
-const chatRouter = require('./src/routes/chat'); 
+const geminiRouter = require('./src/routes/gemini'); // Updated gemini.js
 
-// Routes - ONLY USE EXISTING ROUTES
+// ONLY MOUNT GEMINI AT /api/chat (remove duplicate mounting)
 app.use('/api/books', booksRouter);
 app.use('/api/reserve', reserveRouter);
-app.use('/api/gemini', geminiRouter);
-app.use('/api/chat', chatRouter);      // Fallback with sessions
+app.use('/api/chat', geminiRouter);    // Main chat endpoint
+app.use('/api/gemini', geminiRouter);  // Keep for backward compatibility
+
+console.log("=== UPDATED ROUTER CONFIGURATION ===");
+console.log("✓ /api/chat → gemini.js (Gemini with fallback)");
+console.log("✓ /api/gemini → gemini.js (Backward compatibility)");
+console.log("✓ /api/gemini/gemini-only → Pure Gemini (no fallback)");
+console.log("✓ /api/gemini/fallback-only → Fallback only (no Gemini)");
 
 // Health check endpoint (for Render.com monitoring)
 app.get('/health', (req, res) => {
