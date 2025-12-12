@@ -112,7 +112,7 @@
 
     <script>
         // --- 1. CONFIGURATION ---
-        const API_BASE_URL = 'https://ublc-backend.onrender.com';
+        const API_BASE_URL = 'https://ublc-ai-automation-1.onrender.com';
        
         // Centralized State Object
         const APP_STATE = {
@@ -233,31 +233,17 @@
             }
         }
 
-             async function fetchBooks() {
-            APP_STATE.error = null;
-            const data = await apiFetch('/api/books');
-            console.log('Books API response:', data);  // <-- Add this line
-        
-            if (data && Array.isArray(data.books)) {
-                APP_STATE.books = data.books;
-            } else if (Array.isArray(data)) { // fallback if API returns raw array
-                APP_STATE.books = data;
+     
+        async function fetchBooks() {
+        APP_STATE.error = null;
+        const data = await apiFetch('/api/books');
+        if (data && Array.isArray(data)) {
+              APP_STATE.books = data;
             } else if (!APP_STATE.error) {
                 APP_STATE.error = 'Failed to load books. The response was unexpected.';
-            }
-            render();
+           }
+           render();
         }
-
-      //  async function fetchBooks() {
-      //  APP_STATE.error = null;
-      //  const data = await apiFetch('/api/books');
-      //   if (data && Array.isArray(data)) {
-      //         APP_STATE.books = data;
-      //   } else if (!APP_STATE.error) {
-      //          APP_STATE.error = 'Failed to load books. The response was unexpected.';
-      //     }
-      //     render();
-      //  }
 
         async function reserveBook() {
             if (!APP_STATE.selectedBook) return;
