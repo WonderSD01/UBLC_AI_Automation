@@ -82,18 +82,41 @@ function hasReservationIntent(message) {
 function processReservationFlow(message, session, sessionId, books = []) {
     const lowerMsg = message.toLowerCase().trim();
 
-    // STEP: waiting for YES / NO confirmation
-    if (session.step === 'awaiting_confirmation') {
-        if (lowerMsg === 'yes') {
+    // 1️⃣ Step: collecting student info
+    if (session.step === "collecting_info") {
+        const match = message.match(/(\d+),\s*(.*?),\s*([\w.-]+@[\w.-]+\.\w+)/);
+        if (!match) {
+            return {
+                success: false,
+                reply: "Please provide your details in this format:\n\n**ID, Full Name, Email**"
+            };
+        }
 
+        session.data.studentInfo = {
+            studentId: match[1],
+            name: match[2],
+            email: match[3]
+        };
+
+        session.step = "awaiting_confirmation";
+
+        return {
+            success: true,
+            reply: `Please confirm your reservation:\n\nStudent: ${session.data.studentInfo.name}\nID: ${session.data.studentInfo.studentId}\nEmail: ${session.data.studentInfo.email}\nBook: ${session.data.bookTitle}\n\nReply **yes** to confirm or **no** to update your information.`,
+            requiresConfirmation: true
+        };
+    }
+
+    // 2️⃣ Step: awaiting confirmation
+    if (session.step === "awaiting_confirmation") {
+        if (lowerMsg === "yes") {
             const book = books.find(b => b.title === session.data.bookTitle);
 
             if (!book) {
                 clearSession(sessionId);
                 return {
                     success: false,
-                    reply: `Sorry, "${session.data.bookTitle}" was not found.`,
-                    sessionId: null
+                    reply: `Sorry, I cannot find the book "${session.data.bookTitle}".`
                 };
             }
 
@@ -101,52 +124,52 @@ function processReservationFlow(message, session, sessionId, books = []) {
                 clearSession(sessionId);
                 return {
                     success: false,
-                    reply: `"${book.title}" is unavailable.`,
-                    sessionId: null
+                    reply: `Sorry, "${book.title}" is currently unavailable.`
                 };
             }
 
-            const reservationId = 'RES-' + Date.now();
+            const reservationId = "RES-" + Date.now();
+
+            const successMessage = 
+                `✅ **RESERVATION CONFIRMED!**\n\n` +
+                `📚 Book: ${book.title}\n` +
+                `👤 Student: ${session.data.studentInfo.name}\n` +
+                `🆔 Student ID: ${session.data.studentInfo.studentId}\n` +
+                `📧 Email: ${session.data.studentInfo.email}\n` +
+                `🆔 Reservation ID: ${reservationId}\n` +
+                `📅 Pick-up by: ${new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toLocaleDateString()}`;
 
             clearSession(sessionId);
 
             return {
                 success: true,
-                reply:
-`✅ **RESERVATION CONFIRMED!**
-
-📚 **Book:** ${book.title}
-👤 **Student:** ${session.data.studentInfo.name} (${session.data.studentInfo.studentId})
-📧 **Email:** ${session.data.studentInfo.email}
-🆔 **Reservation ID:** ${reservationId}
-
-Please present your Student ID at pickup.`,
-                reservationConfirmed: true
+                reply: successMessage,
+                reservationComplete: true,
+                reservationId: reservationId
             };
         }
 
-        if (lowerMsg === 'no') {
-            session.step = 'collecting_info';
+        if (lowerMsg === "no") {
+            session.step = "collecting_info";
             session.data.studentInfo = null;
 
             return {
                 success: true,
-                reply: `No problem! Please re-enter:
-1. Student ID
-2. Full Name
-3. Email Address`,
+                reply: "Okay! Please send your correct details in this format:\n\n**ID, Full Name, Email**",
                 requiresStudentInfo: true
             };
         }
 
         return {
             success: true,
-            reply: `Please reply **yes** to confirm or **no** to edit.`
+            reply: `Please reply **yes** to confirm or **no** to update your information.`,
+            requiresConfirmation: true
         };
     }
 
     return null;
 }
+
 
 
 module.exports = {
