@@ -25,8 +25,8 @@ app.use(cors({
         'http://localhost:5500',
         'http://localhost:8080',
         'https://ublc-ai-automation-1.onrender.com', 
-        'https://ublc-ai-automation-uwks.onrender.com'
-        //'https://*.onrender.com'
+        'https://ublc-ai-automation-uwks.onrender.com',
+        'https://*.onrender.com'
     ],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
