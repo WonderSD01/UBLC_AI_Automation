@@ -233,16 +233,27 @@
             }
         }
 
-        async function fetchBooks() {
+                async function fetchBooks() {
             APP_STATE.error = null;
             const data = await apiFetch('/api/books');
-            if (data && Array.isArray(data)) {
-                APP_STATE.books = data;
+            if (data && Array.isArray(data.books)) {
+                APP_STATE.books = data.books; // <- note the change here
             } else if (!APP_STATE.error) {
                 APP_STATE.error = 'Failed to load books. The response was unexpected.';
             }
             render();
         }
+
+      //  async function fetchBooks() {
+      //  APP_STATE.error = null;
+      //  const data = await apiFetch('/api/books');
+      //   if (data && Array.isArray(data)) {
+      //         APP_STATE.books = data;
+      //   } else if (!APP_STATE.error) {
+      //          APP_STATE.error = 'Failed to load books. The response was unexpected.';
+      //     }
+      //     render();
+      //  }
 
         async function reserveBook() {
             if (!APP_STATE.selectedBook) return;
