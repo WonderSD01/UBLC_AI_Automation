@@ -233,11 +233,15 @@
             }
         }
 
-                async function fetchBooks() {
+             async function fetchBooks() {
             APP_STATE.error = null;
             const data = await apiFetch('/api/books');
+            console.log('Books API response:', data);  // <-- Add this line
+        
             if (data && Array.isArray(data.books)) {
-                APP_STATE.books = data.books; // <- note the change here
+                APP_STATE.books = data.books;
+            } else if (Array.isArray(data)) { // fallback if API returns raw array
+                APP_STATE.books = data;
             } else if (!APP_STATE.error) {
                 APP_STATE.error = 'Failed to load books. The response was unexpected.';
             }
