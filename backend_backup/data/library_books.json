@@ -1,0 +1,26 @@
+[
+  {
+    "bookId": "B001",
+    "title": "Programming in C",
+    "author": "Dennis Ritchie",
+    "copies_available": 2,
+    "location": "Shelf A1",
+    "borrow_period_days": 14
+  },
+  {
+    "bookId": "B002",
+    "title": "Intro to AI",
+    "author": "Stuart Russell",
+    "copies_available": 1,
+    "location": "Shelf B2",
+    "borrow_period_days": 14
+  },
+  {
+    "bookId": "B003",
+    "title": "Database Systems",
+    "author": "Silberschatz",
+    "copies_available": 0,
+    "location": "Shelf C3",
+    "borrow_period_days": 14
+  }
+]

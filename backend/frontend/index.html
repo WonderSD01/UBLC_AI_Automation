@@ -112,7 +112,7 @@
 
 <script>
 // -- 1. CONFIGURATION --
-const API_BASE_URL = 'https://ublic-backend.onrender.com';
+const API_BASE_URL = 'https://ublc-ai-automation-1.onrender.com';
 
 // Centralized State Object
 const APP_STATE = {
@@ -239,14 +239,16 @@ async function apiFetch(endpoint, options = {}) {
 }
 
 async function fetchBooks() {
-    APP_STATE.error = null;
-    const data = await apiFetch('/api/books');
-    if (data && Array.isArray(data)) {
-        APP_STATE.books = data;
-    } else if (!APP_STATE.error) {
-        APP_STATE.error = 'Failed to load books. The response was unexpected.';
-    }
-    render();
+  APP_STATE.error = null;
+  const data = await apiFetch('/api/books'); // ← This should work with correct API_BASE_URL
+  
+  if (data && Array.isArray(data)) {
+    APP_STATE.books = data;
+    console.log('Loaded', data.length, 'books'); // Add this for debugging
+  } else {
+    APP_STATE.error = 'Failed to load books.';
+  }
+  render();
 }
 
 async function reserveBook() {
@@ -284,107 +286,89 @@ async function reserveBook() {
 }
 
 async function sendChatMessage(message) {
-    const userMessage = { sender: 'User', text: message };
-    APP_STATE.chatHistory.push(userMessage);
+  const userMessage = { sender: 'User', text: message };
+  APP_STATE.chatHistory.push(userMessage);
+  render();
+  const chatBox = document.getElementById('chat-box');
+  if (chatBox) chatBox.scrollTop = chatBox.scrollHeight;
+
+  // Check if we have student info
+  if (!APP_STATE.hasStudentInfo && message.toLowerCase().includes('reserve')) {
+    APP_STATE.chatHistory.push({
+      sender: 'AI',
+      text: "I need your student information first to help with reservations. Please click the 'Add Student Info' button above."
+    });
     render();
-    
-    const chatBox = document.getElementById('chat-box');
-    if (chatBox) chatBox.scrollTop = chatBox.scrollHeight;
+    return;
+  }
 
-    // Check if we have student info
-    if (!APP_STATE.hasStudentInfo && message.toLowerCase().includes('reserve')) {
-        APP_STATE.chatHistory.push({
-            sender: 'AI',
-            text: "I need your student information first to help with reservations. Please click the 'Add Student Info' button above."
-        });
-        render();
-        return;
-    }
-
-    try {
-        APP_STATE.loading = true;
-        render();
-
-        // Use the correct chat endpoint based on your backend
-const result = await apiFetch('/api/gemini/chat', {
-            method: 'POST',
-            body: JSON.stringify({
-                message: message,
-                student: APP_STATE.hasStudentInfo ? APP_STATE.studentInfo : null,
-                sessionId: APP_STATE.currentSessionId
-            })
-        });
-
-        if (result.success) {
-            // Update session ID if provided
-            if (result.sessionId) {
-                APP_STATE.currentSessionId = result.sessionId;
-            }
-
-            // Handle reservation flow responses
-            let aiResponse = result.reply || result.response || "I'm here to help!";
-            
-            // Check for reservation completion
-            if (result.reservationComplete) {
-                aiResponse = `🎉 **Reservation Confirmed!**\n\nReservation ID: ${result.reservationId}\n\n${aiResponse}`;
-                APP_STATE.currentSessionId = null; // Clear session after completion
-            }
-            
-            // Check if we need student info
-            if (result.requiresStudentInfo && !APP_STATE.hasStudentInfo) {
-                aiResponse += "\n\n⚠️ I need your student information first. Please click 'Add Student Info' above.";
-            }
-            
-            APP_STATE.chatHistory.push({ sender: 'AI', text: aiResponse });
-            
-            // Store reservation intent for UI handling
-            if (result.reservationIntent) {
-                APP_STATE.lastReservationIntent = {
-                    wantsReservation: true,
-                    requiresStudentInfo: result.requiresStudentInfo || false,
-                    bookTitle: result.bookTitle
-                };
-                
-                // Auto-navigate to book list if reservation intent detected
-                if (result.bookTitle && !result.requiresStudentInfo && APP_STATE.hasStudentInfo) {
-                    const mentionedBook = APP_STATE.books.find(book => 
-                        book.title.toLowerCase().includes(result.bookTitle.toLowerCase())
-                    );
-                    if (mentionedBook) {
-                        setTimeout(() => {
-                            APP_STATE.selectedBook = mentionedBook;
-                            APP_STATE.reservationData = {
-                                studentId: APP_STATE.studentInfo.studentId,
-                                studentName: APP_STATE.studentInfo.name,
-                                studentEmail: APP_STATE.studentInfo.email
-                            };
-                            APP_STATE.currentPage = 'reserve';
-                            render();
-                        }, 2000);
-                    }
-                }
-            }
-        } else {
-            APP_STATE.chatHistory.push({
-                sender: 'AI',
-                text: 'Error: Could not process your request. Please try again.'
-            });
-        }
-    } catch (e) {
-        console.error('Chat error:', e);
-        APP_STATE.chatHistory.push({
-            sender: 'AI',
-            text: 'Error: Could not reach the AI service. Please check your network.'
-        });
-    }
-
-    APP_STATE.loading = false;
+  try {
+    APP_STATE.loading = true;
     render();
-    
-    const chatBoxAfter = document.getElementById('chat-box');
-    if (chatBoxAfter) {
-        chatBoxAfter.scrollTop = chatBoxAfter.scrollHeight;
+
+    // FIX: Use the correct endpoint - /api/chat instead of /api/gemini/chat
+    const result = await apiFetch('/api/chat', {
+      method: 'POST',
+      body: JSON.stringify({
+        message: message,
+        student: APP_STATE.hasStudentInfo ? APP_STATE.studentInfo : null,
+        sessionId: APP_STATE.currentSessionId
+      })
+    });
+
+    console.log('💬 API Response:', result); // Debug logging
+
+    if (result.success) {
+      // Update session ID if provided
+      if (result.sessionId) {
+        APP_STATE.currentSessionId = result.sessionId;
+      }
+      
+      // Handle reservation flow responses
+      let aiResponse = result.reply || result.response || "I'm here to help!";
+      
+      // Check for reservation completion
+      if (result.reservationComplete) {
+        aiResponse = `**Reservation Confirmed!**\n\nReservation ID: ${result.reservationId}\n\n${aiResponse}`;
+        APP_STATE.currentSessionId = null; // Clear session after completion
+      }
+      
+      // Check if we need student info
+      if (result.requiresStudentInfo && !APP_STATE.hasStudentInfo) {
+        aiResponse += "\n\n⚠️ I need your student information first. Please click 'Add Student Info' above.";
+      }
+      
+      APP_STATE.chatHistory.push({ sender: 'AI', text: aiResponse });
+
+      // Store reservation intent for UI handling
+      if (result.reservationIntent) {
+        APP_STATE.lastReservationIntent = {
+          wantsReservation: true,
+          requiresStudentInfo: result.requiresStudentInfo || false,
+          bookTitle: result.bookTitle
+        };
+      }
+    } else {
+      APP_STATE.chatHistory.push({
+        sender: 'AI',
+        text: `Error: ${result.error || 'Could not process your request. Please try again.'}`
+      });
     }
+  } catch (e) {
+    console.error('Chat error:', e);
+    APP_STATE.chatHistory.push({
+      sender: 'AI',
+      text: 'Error: Could not reach the AI service. Please check your network.'
+    });
+  }
+
+  APP_STATE.loading = false;
+  render();
+
+  const chatBoxAfter = document.getElementById('chat-box');
+  if (chatBoxAfter) {
+    chatBoxAfter.scrollTop = chatBoxAfter.scrollHeight;
+  }
 }
 
 // -- 4. UI HANDLERS --

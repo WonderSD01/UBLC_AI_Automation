@@ -28,115 +28,82 @@ async function authenticateGoogleSheets() {
   const serviceEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
   const privateKey = process.env.GOOGLE_PRIVATE_KEY;
 
-  console.log('🔧 Google Sheets Authentication Debug:');
-  console.log('- Service Email:', serviceEmail ? '✓ Set' : '✗ Missing');
-  console.log('- Private Key:', privateKey ? `✓ Set (${privateKey.length} chars)` : '✗ Missing');
-  console.log('- Sheet ID:', process.env.GOOGLE_SHEET_ID ? '✓ Set' : '✗ Missing');
-
   if (!serviceEmail || !privateKey) {
     throw new Error('Missing Google Sheets credentials');
   }
 
-  // CRITICAL FIX: Convert escaped \n to actual newlines
-  const cleanPrivateKey = privateKey.replace(/\\n/g, '\n');
-  
-  console.log('- Cleaned Key Length:', cleanPrivateKey.length);
-  console.log('- First line of key:', cleanPrivateKey.split('\n')[0]);
-  console.log('- Last line of key:', cleanPrivateKey.split('\n').pop());
+  // Clean the private key
+  const cleanPrivateKey = privateKey
+    .replace(/\\n/g, '\n')
+    .replace(/^"|"$/g, '')
+    .trim();
 
-  try {
-    const auth = new google.auth.GoogleAuth({
-      credentials: {
-        type: 'service_account',
-        project_id: process.env.GOOGLE_PROJECT_ID || 'ublc-library-system',
-        private_key_id: process.env.GOOGLE_PRIVATE_KEY_ID || 'auto-generated',
-        private_key: cleanPrivateKey,
-        client_email: serviceEmail,
-        client_id: process.env.GOOGLE_CLIENT_ID || 'auto-generated',
-        auth_uri: 'https://accounts.google.com/o/oauth2/auth',
-        token_uri: 'https://oauth2.googleapis.com/token',
-      },
-      scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-    });
+  const auth = new google.auth.GoogleAuth({
+    credentials: {
+      type: 'service_account',
+      project_id: process.env.GOOGLE_PROJECT_ID || 'ublc-library-system',
+      private_key_id: process.env.GOOGLE_PRIVATE_KEY_ID || 'auto-generated',
+      private_key: cleanPrivateKey,
+      client_email: serviceEmail,
+      client_id: process.env.GOOGLE_CLIENT_ID || 'auto-generated',
+      auth_uri: 'https://accounts.google.com/o/oauth2/auth',
+      token_uri: 'https://oauth2.googleapis.com/token',
+    },
+    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+  });
 
-    console.log('✅ Google Auth created successfully');
-    return google.sheets({ version: 'v4', auth });
-  } catch (authError) {
-    console.error('❌ Google Auth creation failed:', authError.message);
-    throw authError;
-  }
+  return google.sheets({ version: 'v4', auth });
 }
 
-// Function to read from Google Sheet
+// Function to read from Google Sheet with Service Account
 async function readBooks() {
   const sheetId = process.env.GOOGLE_SHEET_ID;
-
-  console.log('📊 DEBUG: Starting readBooks()');
-  console.log('📊 Sheet ID:', sheetId);
+  
+  console.log('🔍 DEBUG: Sheet ID:', sheetId);
+  console.log('🔍 DEBUG: Service Email configured:', !!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL);
+  console.log('🔍 DEBUG: Private Key configured:', !!process.env.GOOGLE_PRIVATE_KEY);
 
   if (!sheetId) {
-    console.log('⚠️ Missing Google Sheet ID, using mock data');
+    console.log('❌ Missing Google Sheet ID');
     return mockBooks;
   }
 
   try {
-    console.log('🔄 Connecting to Google Sheets...');
+    console.log('📊 Reading from Google Sheet with Service Account...');
+    
     const sheets = await authenticateGoogleSheets();
+    
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: sheetId,
+      range: 'Books!A2:F',
+    });
 
-    // IMPORTANT: Check different ranges to find your data
-    console.log('🔄 Fetching data from Google Sheets...');
-    
-    // Try different ranges to find where your data is
-    const rangesToTry = ['Books!A2:F', 'Books!A1:F', 'Sheet1!A2:F', 'A2:F'];
-    
-    for (const range of rangesToTry) {
-      try {
-        console.log(`🔄 Trying range: ${range}`);
-        const response = await sheets.spreadsheets.values.get({
-          spreadsheetId: sheetId,
-          range: range,
-        });
-        
-        const rows = response.data.values || [];
-        console.log(`📊 Found ${rows.length} rows in range: ${range}`);
-        
-        if (rows.length > 0) {
-          console.log('📊 First row:', rows[0]);
-          console.log('📊 Second row:', rows[1]);
-          
-          // Parse the rows into book objects
-          const books = rows.map((row, index) => {
-            // If first row is headers, skip it
-            if (index === 0 && (row[0] === 'bookId' || row[0] === 'Book ID' || row[0] === 'ID')) {
-              console.log('📊 Skipping header row');
-              return null;
-            }
-            
-            return {
-              bookId: row[0] || `B${String(index + 1).padStart(3, '0')}`,
-              title: row[1] || 'Unknown Title',
-              author: row[2] || 'Unknown Author',
-              copies_available: parseInt(row[3]) || 0,
-              location: row[4] || 'Unknown Location',
-              category: row[5] || 'Uncategorized'
-            };
-          }).filter(book => book !== null); // Remove null entries (like headers)
-          
-          console.log(`✅ Successfully loaded ${books.length} books from Google Sheets`);
-          return books;
-        }
-      } catch (rangeError) {
-        console.log(`⚠️ Range ${range} failed: ${rangeError.message}`);
-      }
+    console.log('✅ Google Sheets API response received');
+    const rows = response.data.values || [];
+    console.log(`📊 Found ${rows.length} rows in Google Sheets`);
+
+    if (rows.length === 0) {
+      console.log('❌ Google Sheets is EMPTY - no data found');
+      return mockBooks;
     }
+
+    console.log('📖 First row sample:', rows[0]);
     
-    console.log('⚠️ No data found in any range, using mock data');
-    return mockBooks;
-    
+    const books = rows.map(row => ({
+      bookId: row[0] || '',
+      title: row[1] || '',
+      author: row[2] || '',
+      copies_available: parseInt(row[3]) || 0,
+      location: row[4] || '',
+      category: row[5] || ''
+    }));
+
+    console.log(`✅ Successfully loaded ${books.length} REAL books from Google Sheets`);
+    return books;
+
   } catch (error) {
     console.error('❌ Google Sheets ERROR:', error.message);
-    console.error('Full error:', error);
-    console.log('⚠️ Falling back to mock data');
+    console.log('📚 Falling back to mock data');
     return mockBooks;
   }
 }
