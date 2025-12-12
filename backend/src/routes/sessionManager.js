@@ -81,69 +81,73 @@ function hasReservationIntent(message) {
 // Process reservation flow (uses real book data)
 function processReservationFlow(message, session, sessionId, books = []) {
     const lowerMsg = message.toLowerCase().trim();
-    
-    // User confirms
-    if (lowerMsg === 'yes' || lowerMsg.includes('correct') || lowerMsg.includes('confirm')) {
-        // Find book in real data
-        const book = books.find(b => b.title === session.data.bookTitle);
 
-        if (!book) {
-            const errorMessage = `Sorry, "${session.data.bookTitle}" was not found.`;
+    // STEP: waiting for YES / NO confirmation
+    if (session.step === 'awaiting_confirmation') {
+        if (lowerMsg === 'yes') {
+
+            const book = books.find(b => b.title === session.data.bookTitle);
+
+            if (!book) {
+                clearSession(sessionId);
+                return {
+                    success: false,
+                    reply: `Sorry, "${session.data.bookTitle}" was not found.`,
+                    sessionId: null
+                };
+            }
+
+            if (book.copies_available < 1) {
+                clearSession(sessionId);
+                return {
+                    success: false,
+                    reply: `"${book.title}" is unavailable.`,
+                    sessionId: null
+                };
+            }
+
+            const reservationId = 'RES-' + Date.now();
+
             clearSession(sessionId);
+
             return {
-                success: false,
-                reply: errorMessage,
-                sessionId: null
+                success: true,
+                reply:
+`✅ **RESERVATION CONFIRMED!**
+
+📚 **Book:** ${book.title}
+👤 **Student:** ${session.data.studentInfo.name} (${session.data.studentInfo.studentId})
+📧 **Email:** ${session.data.studentInfo.email}
+🆔 **Reservation ID:** ${reservationId}
+
+Please present your Student ID at pickup.`,
+                reservationConfirmed: true
             };
         }
 
-        if (book.copies_available < 1) {
-            const errorMessage = `"${book.title}" is currently unavailable (${book.copies_available} copies).`;
-            clearSession(sessionId);
+        if (lowerMsg === 'no') {
+            session.step = 'collecting_info';
+            session.data.studentInfo = null;
+
             return {
-                success: false,
-                reply: errorMessage,
-                sessionId: null
+                success: true,
+                reply: `No problem! Please re-enter:
+1. Student ID
+2. Full Name
+3. Email Address`,
+                requiresStudentInfo: true
             };
         }
 
-        // Create successful reservation
-        const reservationId = 'RES-' + Date.now();
-        const successMessage = `✅ **RESERVATION CONFIRMED!**\n\n📚 **Book:** ${book.title}\n👤 **Student:** ${session.data.studentInfo.name} (${session.data.studentInfo.studentId})\n📧 **Email:** ${session.data.studentInfo.email}\n🆔 **Reservation ID:** ${reservationId}\n📅 **Pick-up by:** ${new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toLocaleDateString()}\n📍 **Location:** ${book.location || 'UBLC Library'}\n\nPlease present your Student ID at the library counter.`;
-
-        // Note: Real availability update happens via API call
-        clearSession(sessionId);
-
         return {
             success: true,
-            reply: successMessage,
-            sessionId: null,
-            reservationId: reservationId,
-            reservationComplete: true,
-            book: {
-                id: book.bookId || book.id,
-                title: book.title,
-                author: book.author
-            },
-            student: session.data.studentInfo
-        };
-    } else if (lowerMsg === 'no' || lowerMsg.includes('wrong') || lowerMsg.includes('change')) {
-        // User wants to correct info
-        session.step = 'collecting_info';
-        session.data.studentInfo = null;
-
-        const correctionMessage = "Please provide the correct information:\n1. **Student ID:**\n2. **Full Name:**\n3. **Email Address:**";
-
-        return {
-            success: true,
-            reply: correctionMessage,
-            sessionId: sessionId,
-            requiresStudentInfo: true
+            reply: `Please reply **yes** to confirm or **no** to edit.`
         };
     }
-    
-    return null; // No match
+
+    return null;
 }
+
 
 module.exports = {
     generateSessionId,
