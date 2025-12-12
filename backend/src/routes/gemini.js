@@ -22,7 +22,7 @@ async function fetchRealBooks() {
         console.log('$ Fetching real books from API...');
         
         // Your live API endpoint
-        const response = await fetch('https://ublc-ai-automation-1.onrender.com');
+        const response = await fetch('https://ublc-ai-automation-1.onrender.com/api/books');
         
         if (!response.ok) {
             console.warn(`API responded with status: ${response.status}`);
