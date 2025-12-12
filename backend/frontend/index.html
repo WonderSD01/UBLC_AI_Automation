@@ -286,90 +286,98 @@ async function reserveBook() {
 }
 
 async function sendChatMessage(message) {
-  const userMessage = { sender: 'User', text: message };
-  APP_STATE.chatHistory.push(userMessage);
-  render();
-  const chatBox = document.getElementById('chat-box');
-  if (chatBox) chatBox.scrollTop = chatBox.scrollHeight;
-
-  // Check if we have student info
-  if (!APP_STATE.hasStudentInfo && message.toLowerCase().includes('reserve')) {
-    APP_STATE.chatHistory.push({
-      sender: 'AI',
-      text: "I need your student information first to help with reservations. Please click the 'Add Student Info' button above."
-    });
-    render();
-    return;
-  }
-
-  try {
-    APP_STATE.loading = true;
+    const userMessage = { sender: 'User', text: message };
+    APP_STATE.chatHistory.push(userMessage);
     render();
 
-    // FIX: Use the correct endpoint - /api/chat instead of /api/gemini/chat
-    const result = await apiFetch('/api/chat', {
-      method: 'POST',
-      body: JSON.stringify({
-        message: message,
-        student: APP_STATE.hasStudentInfo ? APP_STATE.studentInfo : null,
-        sessionId: APP_STATE.currentSessionId
-      })
-    });
+    const chatBox = document.getElementById('chat-box');
+    if (chatBox) chatBox.scrollTop = chatBox.scrollHeight;
 
-    console.log('💬 API Response:', result); // Debug logging
-
-    if (result.success) {
-      // Update session ID if provided
-      if (result.sessionId) {
-        APP_STATE.currentSessionId = result.sessionId;
-      }
-      
-      // Handle reservation flow responses
-      let aiResponse = result.reply || result.response || "I'm here to help!";
-      
-      // Check for reservation completion
-      if (result.reservationComplete) {
-        aiResponse = `**Reservation Confirmed!**\n\nReservation ID: ${result.reservationId}\n\n${aiResponse}`;
-        APP_STATE.currentSessionId = null; // Clear session after completion
-      }
-      
-      // Check if we need student info
-      if (result.requiresStudentInfo && !APP_STATE.hasStudentInfo) {
-        aiResponse += "\n\n⚠️ I need your student information first. Please click 'Add Student Info' above.";
-      }
-      
-      APP_STATE.chatHistory.push({ sender: 'AI', text: aiResponse });
-
-      // Store reservation intent for UI handling
-      if (result.reservationIntent) {
-        APP_STATE.lastReservationIntent = {
-          wantsReservation: true,
-          requiresStudentInfo: result.requiresStudentInfo || false,
-          bookTitle: result.bookTitle
-        };
-      }
-    } else {
-      APP_STATE.chatHistory.push({
-        sender: 'AI',
-        text: `Error: ${result.error || 'Could not process your request. Please try again.'}`
-      });
+    // If student info is missing and user asks to reserve, prompt for info
+    if (!APP_STATE.hasStudentInfo && message.toLowerCase().includes('reserve')) {
+        APP_STATE.chatHistory.push({
+            sender: 'AI',
+            text: "I need your student information first to help with reservations. Please click the 'Add Student Info' button above."
+        });
+        render();
+        return;
     }
-  } catch (e) {
-    console.error('Chat error:', e);
-    APP_STATE.chatHistory.push({
-      sender: 'AI',
-      text: 'Error: Could not reach the AI service. Please check your network.'
-    });
-  }
 
-  APP_STATE.loading = false;
-  render();
+    try {
+        APP_STATE.loading = true;
+        render();
 
-  const chatBoxAfter = document.getElementById('chat-box');
-  if (chatBoxAfter) {
-    chatBoxAfter.scrollTop = chatBoxAfter.scrollHeight;
-  }
+        const result = await apiFetch('/api/chat', {
+            method: 'POST',
+            body: JSON.stringify({
+                message: message,
+                student: APP_STATE.hasStudentInfo ? APP_STATE.studentInfo : null,
+                sessionId: APP_STATE.currentSessionId
+            })
+        });
+
+        console.log('💬 API Response:', result); // Debug log
+
+        if (result.success) {
+            // Update session ID if provided
+            if (result.sessionId) APP_STATE.currentSessionId = result.sessionId;
+
+            // Sanitize AI reply to remove confirmation loops
+            let aiResponse = result.reply || result.response || "I'm here to help!";
+            aiResponse = aiResponse.replace(/Confirm:.*Reply\s+YES/gi, '').trim();
+
+            // Store reservation intent for UI handling
+            if (result.reservationIntent) {
+                APP_STATE.lastReservationIntent = {
+                    wantsReservation: true,
+                    requiresStudentInfo: result.requiresStudentInfo || false,
+                    bookTitle: result.bookTitle
+                };
+            }
+
+            // If AI wants to reserve and student info is complete, auto-fill reservation form
+            if (result.reservationIntent && !result.requiresStudentInfo && APP_STATE.hasStudentInfo) {
+                const mentionedBook = APP_STATE.books.find(b => 
+                    message.toLowerCase().includes(b.title.toLowerCase()) || 
+                    message.toLowerCase().includes(b.author.toLowerCase())
+                ) || APP_STATE.books[0]; // fallback to first book
+
+                APP_STATE.selectedBook = mentionedBook;
+                APP_STATE.reservationData = {
+                    studentId: APP_STATE.studentInfo.studentId,
+                    studentName: APP_STATE.studentInfo.name,
+                    studentEmail: APP_STATE.studentInfo.email
+                };
+                APP_STATE.currentPage = 'reserve';
+                render();
+                return; // Stop appending AI response to chat to prevent loop
+            }
+
+            // Append AI message
+            APP_STATE.chatHistory.push({ sender: 'AI', text: aiResponse });
+
+        } else {
+            APP_STATE.chatHistory.push({
+                sender: 'AI',
+                text: `Error: ${result.error || 'Could not process your request. Please try again.'}`
+            });
+        }
+
+    } catch (e) {
+        console.error('Chat error:', e);
+        APP_STATE.chatHistory.push({
+            sender: 'AI',
+            text: 'Error: Could not reach the AI service. Please check your network.'
+        });
+    }
+
+    APP_STATE.loading = false;
+    render();
+
+    const chatBoxAfter = document.getElementById('chat-box');
+    if (chatBoxAfter) chatBoxAfter.scrollTop = chatBoxAfter.scrollHeight;
 }
+
 
 // -- 4. UI HANDLERS --
 function handleReserveClick(book) {
