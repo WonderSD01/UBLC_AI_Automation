@@ -286,96 +286,97 @@ async function reserveBook() {
 }
 
 async function sendChatMessage(message) {
-    const userMessage = { sender: 'User', text: message };
-    APP_STATE.chatHistory.push(userMessage);
+  const userMessage = { sender: 'User', text: message };
+  APP_STATE.chatHistory.push(userMessage);
+  render();
+
+  const chatBox = document.getElementById('chat-box');
+  if (chatBox) chatBox.scrollTop = chatBox.scrollHeight;
+
+  // If user asks to reserve but no student info, backend will ask for student info.
+  // But when the user provides student info typed as "ID, Full Name, email@domain" we
+  // should send that as `student` payload rather than plain message text.
+  const studentMatch = message.match(/^\s*(\d+)\s*,\s*([^,]+?)\s*,\s*([\w.+-]+@[\w.-]+\.\w+)\s*$/i);
+  const sendingStudentObj = studentMatch ? {
+    studentId: studentMatch[1].trim(),
+    name: studentMatch[2].trim(),
+    email: studentMatch[3].trim()
+  } : null;
+
+  // If student info present locally, update APP_STATE (so UI shows it)
+  if (sendingStudentObj) {
+    APP_STATE.studentInfo = sendingStudentObj;
+    APP_STATE.hasStudentInfo = true;
+  }
+
+  // If user hasn't filled student info and message is a reservation trigger, prompt locally
+  if (!APP_STATE.hasStudentInfo && message.toLowerCase().includes('reserve')) {
+    APP_STATE.chatHistory.push({
+      sender: 'AI',
+      text: "I need your student information first to help with reservations. Please click the 'Add Student Info' button above or type: ID, Full Name, email@ub.edu.ph"
+    });
+    render();
+    return;
+  }
+
+  try {
+    APP_STATE.loading = true;
     render();
 
-    const chatBox = document.getElementById('chat-box');
-    if (chatBox) chatBox.scrollTop = chatBox.scrollHeight;
+    // Build request body: include student object if we parsed one, else null
+    const bodyPayload = sendingStudentObj
+      ? { message: 'providing student info', student: sendingStudentObj, sessionId: APP_STATE.currentSessionId }
+      : { message, student: APP_STATE.hasStudentInfo ? APP_STATE.studentInfo : null, sessionId: APP_STATE.currentSessionId };
 
-    // If student info is missing and user asks to reserve, prompt for info
-    if (!APP_STATE.hasStudentInfo && message.toLowerCase().includes('reserve')) {
-        APP_STATE.chatHistory.push({
-            sender: 'AI',
-            text: "I need your student information first to help with reservations. Please click the 'Add Student Info' button above."
-        });
-        render();
-        return;
+    const result = await apiFetch('/api/chat', {
+      method: 'POST',
+      body: JSON.stringify(bodyPayload)
+    });
+
+    console.log('💬 API Response:', result);
+
+    // Keep session id if returned
+    if (result.sessionId) {
+      APP_STATE.currentSessionId = result.sessionId;
     }
 
-    try {
-        APP_STATE.loading = true;
-        render();
+    if (result.success) {
+      // The backend may return reply or response - handle both
+      let aiResponse = result.reply || result.response || result.message || "I'm here to help!";
+      // Avoid repeating the exact confirmation prompt if backend echoes the pattern
+      aiResponse = aiResponse.replace(/Confirm:.*Reply\s+['"]?yes['"]?/gi, '').trim();
 
-        const result = await apiFetch('/api/chat', {
-            method: 'POST',
-            body: JSON.stringify({
-                message: message,
-                student: APP_STATE.hasStudentInfo ? APP_STATE.studentInfo : null,
-                sessionId: APP_STATE.currentSessionId
-            })
-        });
+      // If backend says reservationComplete, show confirmation and clear session
+      if (result.reservationComplete) {
+        aiResponse = (result.reply || aiResponse) + `\n\nReservation ID: ${result.reservationId || result.reservationId || ''}`;
+        APP_STATE.currentSessionId = null;
+      }
 
-        console.log('💬 API Response:', result); // Debug log
+      if (result.requiresStudentInfo && !APP_STATE.hasStudentInfo) {
+        // backend asks for student info
+        aiResponse += "\n\n⚠️ Please provide your student info in this format: ID, Full Name, email@ub.edu.ph";
+      }
 
-        if (result.success) {
-            // Update session ID if provided
-            if (result.sessionId) APP_STATE.currentSessionId = result.sessionId;
-
-            // Sanitize AI reply to remove confirmation loops
-            let aiResponse = result.reply || result.response || "I'm here to help!";
-            aiResponse = aiResponse.replace(/Confirm:.*Reply\s+YES/gi, '').trim();
-
-            // Store reservation intent for UI handling
-            if (result.reservationIntent) {
-                APP_STATE.lastReservationIntent = {
-                    wantsReservation: true,
-                    requiresStudentInfo: result.requiresStudentInfo || false,
-                    bookTitle: result.bookTitle
-                };
-            }
-
-            // If AI wants to reserve and student info is complete, auto-fill reservation form
-            if (result.reservationIntent && !result.requiresStudentInfo && APP_STATE.hasStudentInfo) {
-                const mentionedBook = APP_STATE.books.find(b => 
-                    message.toLowerCase().includes(b.title.toLowerCase()) || 
-                    message.toLowerCase().includes(b.author.toLowerCase())
-                ) || APP_STATE.books[0]; // fallback to first book
-
-                APP_STATE.selectedBook = mentionedBook;
-                APP_STATE.reservationData = {
-                    studentId: APP_STATE.studentInfo.studentId,
-                    studentName: APP_STATE.studentInfo.name,
-                    studentEmail: APP_STATE.studentInfo.email
-                };
-                APP_STATE.currentPage = 'reserve';
-                render();
-                return; // Stop appending AI response to chat to prevent loop
-            }
-
-            // Append AI message
-            APP_STATE.chatHistory.push({ sender: 'AI', text: aiResponse });
-
-        } else {
-            APP_STATE.chatHistory.push({
-                sender: 'AI',
-                text: `Error: ${result.error || 'Could not process your request. Please try again.'}`
-            });
-        }
-
-    } catch (e) {
-        console.error('Chat error:', e);
-        APP_STATE.chatHistory.push({
-            sender: 'AI',
-            text: 'Error: Could not reach the AI service. Please check your network.'
-        });
+      APP_STATE.chatHistory.push({ sender: 'AI', text: aiResponse });
+    } else {
+      APP_STATE.chatHistory.push({
+        sender: 'AI',
+        text: `Error: ${result.error || result.message || 'Could not process your request.'}`
+      });
     }
+  } catch (e) {
+    console.error('Chat error:', e);
+    APP_STATE.chatHistory.push({
+      sender: 'AI',
+      text: 'Error: Could not reach the AI service. Please check your network.'
+    });
+  }
 
-    APP_STATE.loading = false;
-    render();
+  APP_STATE.loading = false;
+  render();
 
-    const chatBoxAfter = document.getElementById('chat-box');
-    if (chatBoxAfter) chatBoxAfter.scrollTop = chatBoxAfter.scrollHeight;
+  const chatBoxAfter = document.getElementById('chat-box');
+  if (chatBoxAfter) chatBoxAfter.scrollTop = chatBoxAfter.scrollHeight;
 }
 
 
